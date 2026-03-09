@@ -1,0 +1,2088 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>3D AR Material Editor</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f0f13;
+      --surface: #1a1a22;
+      --surface2: #22222e;
+      --border: #2e2e3e;
+      --accent: #7c6af7;
+      --accent2: #a78bfa;
+      --text: #e8e8f0;
+      --text-muted: #6b6b80;
+      --danger: #f87171;
+      --success: #34d399;
+      --panel-width: 320px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── TOP BAR ── */
+    header {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 10px 20px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      z-index: 10;
+      flex-shrink: 0;
+    }
+
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 16px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+    }
+
+    .logo-icon {
+      width: 28px;
+      height: 28px;
+      background: linear-gradient(135deg, var(--accent), var(--accent2));
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+    }
+
+    .header-actions {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 14px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text);
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s;
+      white-space: nowrap;
+    }
+
+    .btn:hover { background: var(--border); border-color: var(--accent); }
+
+    .btn-primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+
+    .btn-primary:hover { background: var(--accent2); border-color: var(--accent2); }
+
+    .btn svg { flex-shrink: 0; }
+
+    /* ── MAIN LAYOUT ── */
+    .workspace {
+      display: flex;
+      flex: 1;
+      overflow: hidden;
+    }
+
+    /* ── CANVAS AREA ── */
+    #canvas-wrap {
+      flex: 1;
+      position: relative;
+      background: radial-gradient(ellipse at 50% 60%, #1a1040 0%, var(--bg) 70%);
+    }
+
+    canvas { display: block; width: 100% !important; height: 100% !important; }
+
+    .canvas-overlay {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      pointer-events: none;
+    }
+
+    .drop-zone {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 12px;
+      padding: 48px;
+      border: 2px dashed var(--border);
+      border-radius: 20px;
+      text-align: center;
+      backdrop-filter: blur(4px);
+      background: rgba(26,26,34,0.6);
+      pointer-events: all;
+      transition: border-color 0.2s;
+      cursor: pointer;
+      max-width: 400px;
+    }
+
+    .drop-zone:hover, .drop-zone.drag-over {
+      border-color: var(--accent);
+      background: rgba(124,106,247,0.1);
+    }
+
+    .drop-zone-icon {
+      width: 64px;
+      height: 64px;
+      background: var(--surface2);
+      border-radius: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 28px;
+    }
+
+    .drop-zone h2 { font-size: 18px; font-weight: 600; }
+    .drop-zone p { font-size: 13px; color: var(--text-muted); line-height: 1.5; }
+    .drop-zone .file-types {
+      display: flex;
+      gap: 6px;
+    }
+    .badge {
+      padding: 3px 10px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      color: var(--accent2);
+    }
+
+    /* Loading spinner */
+    .spinner-wrap {
+      display: none;
+      position: absolute;
+      inset: 0;
+      align-items: center;
+      justify-content: center;
+      background: rgba(15,15,19,0.8);
+      backdrop-filter: blur(4px);
+      flex-direction: column;
+      gap: 14px;
+      z-index: 5;
+    }
+
+    .spinner-wrap.active { display: flex; }
+
+    .spinner {
+      width: 44px;
+      height: 44px;
+      border: 3px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .spinner-label { font-size: 14px; color: var(--text-muted); }
+
+    /* Error toast */
+    .toast {
+      position: absolute;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%) translateY(80px);
+      background: #2d1b1b;
+      border: 1px solid var(--danger);
+      color: var(--danger);
+      padding: 10px 18px;
+      border-radius: 10px;
+      font-size: 13px;
+      transition: transform 0.3s;
+      z-index: 100;
+      white-space: nowrap;
+    }
+
+    .toast.show { transform: translateX(-50%) translateY(0); }
+
+    /* Canvas info badges */
+    .canvas-info {
+      position: absolute;
+      bottom: 16px;
+      left: 16px;
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .info-chip {
+      background: rgba(26,26,34,0.85);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 4px 12px;
+      font-size: 11px;
+      color: var(--text-muted);
+      backdrop-filter: blur(4px);
+    }
+
+    .info-chip span { color: var(--text); font-weight: 600; }
+
+    /* ── AUTO-ROTATE BUTTON ── */
+    .rotate-btn {
+      position: absolute;
+      top: 14px;
+      right: 14px;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      padding: 8px 14px;
+      background: rgba(26,26,34,0.88);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      color: var(--text-muted);
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      backdrop-filter: blur(6px);
+      transition: all 0.18s;
+      user-select: none;
+      z-index: 4;
+    }
+
+    .rotate-btn:hover { border-color: var(--accent); color: var(--text); }
+
+    .rotate-btn.active {
+      border-color: var(--accent);
+      color: var(--accent2);
+      background: rgba(124,106,247,0.15);
+    }
+
+    .rotate-btn svg {
+      transition: transform 0.4s linear;
+      flex-shrink: 0;
+    }
+
+    .rotate-btn.active svg { animation: spin-slow 2s linear infinite; }
+
+    @keyframes spin-slow { to { transform: rotate(360deg); } }
+
+    /* ── MAP CLEAR BUTTON ── */
+    .map-clear-btn {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 5px;
+      border: 1px solid rgba(248,113,113,0.5);
+      background: rgba(248,113,113,0.12);
+      color: #f87171;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.15s;
+    }
+    .map-clear-btn:hover { background: rgba(248,113,113,0.25); border-color: #f87171; }
+
+    /* ── SIDE PANEL ── */
+    .side-panel {
+      width: var(--panel-width);
+      background: var(--surface);
+      border-left: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      flex-shrink: 0;
+    }
+
+    .panel-header {
+      padding: 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+
+    .panel-title {
+      font-size: 13px;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-muted);
+    }
+
+    .mesh-selector {
+      flex-shrink: 0;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .mesh-selector label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    .mesh-selector select {
+      width: 100%;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      padding: 8px 10px;
+      font-size: 13px;
+      cursor: pointer;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%236b6b80'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+      padding-right: 28px;
+    }
+
+    .mesh-selector select:focus { outline: none; border-color: var(--accent); }
+
+    .panel-scroll {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 0;
+    }
+
+    .panel-scroll::-webkit-scrollbar { width: 5px; }
+    .panel-scroll::-webkit-scrollbar-track { background: transparent; }
+    .panel-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 10px; }
+
+    /* ── SECTIONS ── */
+    .section {
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 2px;
+    }
+
+    .section-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 16px;
+      cursor: pointer;
+      user-select: none;
+      transition: background 0.1s;
+    }
+
+    .section-header:hover { background: var(--surface2); }
+
+    .section-icon {
+      width: 24px;
+      height: 24px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 12px;
+      flex-shrink: 0;
+    }
+
+    .section-label {
+      font-size: 12px;
+      font-weight: 600;
+      flex: 1;
+    }
+
+    .section-chevron {
+      color: var(--text-muted);
+      transition: transform 0.2s;
+      font-size: 10px;
+    }
+
+    .section.collapsed .section-chevron { transform: rotate(-90deg); }
+    .section.collapsed .section-body { display: none; }
+
+    .section-body {
+      padding: 4px 16px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    /* ── CONTROLS ── */
+    .control { display: flex; flex-direction: column; gap: 5px; }
+
+    .control-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .control-label {
+      font-size: 12px;
+      color: var(--text-muted);
+      font-weight: 500;
+    }
+
+    .control-value {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--accent2);
+      min-width: 36px;
+      text-align: right;
+    }
+
+    /* Slider */
+    input[type="range"] {
+      -webkit-appearance: none;
+      width: 100%;
+      height: 4px;
+      border-radius: 4px;
+      background: var(--border);
+      outline: none;
+      cursor: pointer;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: var(--accent);
+      border: 2px solid var(--surface);
+      box-shadow: 0 0 0 2px var(--accent);
+      cursor: pointer;
+      transition: transform 0.1s;
+    }
+
+    input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.2); }
+
+    /* Color picker */
+    .color-control {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .color-swatch-wrap {
+      position: relative;
+      width: 36px;
+      height: 26px;
+      border-radius: 6px;
+      border: 1px solid var(--border);
+      overflow: hidden;
+      cursor: pointer;
+      flex-shrink: 0;
+    }
+
+    .color-swatch-wrap input[type="color"] {
+      position: absolute;
+      inset: 0;
+      width: 150%;
+      height: 150%;
+      border: none;
+      padding: 0;
+      cursor: pointer;
+      opacity: 0;
+    }
+
+    .color-swatch-bg {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+
+    .color-hex {
+      flex: 1;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      font-size: 12px;
+      padding: 5px 8px;
+      font-family: monospace;
+      letter-spacing: 0.5px;
+    }
+
+    .color-hex:focus { outline: none; border-color: var(--accent); }
+
+    /* Toggle */
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .toggle-label {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .toggle {
+      position: relative;
+      width: 34px;
+      height: 18px;
+    }
+
+    .toggle input { opacity: 0; width: 0; height: 0; }
+
+    .toggle-track {
+      position: absolute;
+      inset: 0;
+      background: var(--border);
+      border-radius: 10px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .toggle-track::after {
+      content: '';
+      position: absolute;
+      left: 2px;
+      top: 2px;
+      width: 14px;
+      height: 14px;
+      border-radius: 50%;
+      background: #fff;
+      transition: transform 0.2s;
+    }
+
+    .toggle input:checked + .toggle-track { background: var(--accent); }
+    .toggle input:checked + .toggle-track::after { transform: translateX(16px); }
+
+    /* Select dropdown */
+    .select-control {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      padding: 7px 10px;
+      font-size: 12px;
+      width: 100%;
+      cursor: pointer;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%236b6b80'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+      padding-right: 28px;
+    }
+
+    .select-control:focus { outline: none; border-color: var(--accent); }
+
+    /* Texture slot */
+    .texture-slot {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 8px;
+    }
+
+    .texture-thumb {
+      width: 36px;
+      height: 36px;
+      border-radius: 6px;
+      background: var(--border);
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      color: var(--text-muted);
+      overflow: hidden;
+    }
+
+    .texture-thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: 6px; }
+
+    .texture-info { flex: 1; min-width: 0; }
+    .texture-name { font-size: 11px; color: var(--text); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .texture-sub { font-size: 10px; color: var(--text-muted); }
+
+    /* Reset footer */
+    .panel-footer {
+      padding: 12px 16px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .panel-footer .btn { flex: 1; justify-content: center; font-size: 12px; }
+
+    /* Empty state */
+    .empty-state {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      height: 100%;
+      gap: 10px;
+      color: var(--text-muted);
+      font-size: 13px;
+      text-align: center;
+      padding: 20px;
+    }
+
+    .empty-state-icon { font-size: 40px; opacity: 0.4; }
+
+    /* Tabs */
+    .tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .tab {
+      flex: 1;
+      padding: 10px;
+      text-align: center;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.15s;
+    }
+
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--accent2); border-bottom-color: var(--accent); }
+
+    /* Scene info panel content */
+    .scene-info-list { display: flex; flex-direction: column; gap: 6px; padding: 12px 16px; }
+    .scene-info-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+    }
+    .scene-info-item .k { color: var(--text-muted); }
+    .scene-info-item .v { color: var(--text); font-weight: 600; font-family: monospace; }
+
+    /* Environment select */
+    .env-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+      padding: 8px 16px 12px;
+    }
+
+    .env-btn {
+      padding: 6px 4px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text-muted);
+      font-size: 10px;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: center;
+      transition: all 0.15s;
+      line-height: 1.2;
+    }
+
+    .env-btn:hover { border-color: var(--accent); color: var(--text); }
+    .env-btn.active { border-color: var(--accent); background: rgba(124,106,247,0.15); color: var(--accent2); }
+
+    /* Number input */
+    .number-input {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 5px 8px;
+      font-size: 12px;
+      width: 70px;
+      text-align: right;
+      font-family: monospace;
+    }
+
+    .number-input:focus { outline: none; border-color: var(--accent); }
+
+    .inline-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .inline-row .control-label { flex: 1; font-size: 12px; color: var(--text-muted); }
+
+    /* Section colors */
+    .icon-pbr { background: rgba(124,106,247,0.15); color: #a78bfa; }
+    .icon-color { background: rgba(52,211,153,0.15); color: #34d399; }
+    .icon-transform { background: rgba(251,191,36,0.15); color: #fbbf24; }
+    .icon-light { background: rgba(248,113,113,0.15); color: #f87171; }
+    .icon-alpha { background: rgba(99,179,237,0.15); color: #63b3ed; }
+    .icon-scene { background: rgba(167,139,250,0.15); color: #c084fc; }
+
+    /* Responsive: mobile collapse panel */
+    @media (max-width: 700px) {
+      .side-panel { width: 260px; }
+    }
+  </style>
+</head>
+<body>
+
+<!-- TOP BAR -->
+<header>
+  <div class="logo">
+    <div class="logo-icon">◈</div>
+    3D AR Material Editor
+  </div>
+  <div class="header-actions">
+    <button class="btn" id="btn-upload" title="GLB dosyası aç">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+      GLB Aç
+    </button>
+    <button class="btn" id="btn-screenshot" title="Ekran görüntüsü al" disabled>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+      Kaydet
+    </button>
+    <button class="btn btn-primary" id="btn-reset-all" disabled>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
+      Sıfırla
+    </button>
+  </div>
+</header>
+
+<!-- MAIN -->
+<div class="workspace">
+
+  <!-- CANVAS -->
+  <div id="canvas-wrap">
+    <canvas id="three-canvas"></canvas>
+
+    <!-- Drop zone overlay -->
+    <div class="canvas-overlay" id="drop-overlay">
+      <div class="drop-zone" id="drop-zone">
+        <div class="drop-zone-icon">◈</div>
+        <h2>3D Modelinizi Açın</h2>
+        <p>GLB dosyanızı buraya sürükleyin<br>veya tıklayıp seçin</p>
+        <div class="file-types">
+          <span class="badge">GLB</span>
+          <span class="badge">GLTF</span>
+        </div>
+        <button class="btn btn-primary" style="margin-top:8px;" onclick="document.getElementById('file-input').click()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          Dosya Seç
+        </button>
+      </div>
+    </div>
+
+    <!-- Spinner -->
+    <div class="spinner-wrap" id="spinner">
+      <div class="spinner"></div>
+      <div class="spinner-label">Model yükleniyor...</div>
+    </div>
+
+    <!-- Canvas info -->
+    <div class="canvas-info" id="canvas-info" style="display:none;">
+      <div class="info-chip">Model: <span id="info-name">—</span></div>
+      <div class="info-chip">Mesh: <span id="info-meshes">0</span></div>
+      <div class="info-chip">Tri: <span id="info-tris">0</span></div>
+    </div>
+
+    <!-- Auto-rotate toggle button -->
+    <button class="rotate-btn active" id="rotate-btn" onclick="clickRotateBtn()" title="Otomatik döndürmeyi aç/kapat">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+        <path d="M21.5 2v6h-6"/><path d="M21.34 15.57a10 10 0 1 1-.57-8.38"/>
+      </svg>
+      Döndür
+    </button>
+
+    <!-- Toast -->
+    <div class="toast" id="toast"></div>
+  </div>
+
+  <!-- SIDE PANEL -->
+  <div class="side-panel">
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <div class="tab active" data-tab="material">Materyal</div>
+      <div class="tab" data-tab="scene">Sahne</div>
+    </div>
+
+    <!-- MATERIAL TAB -->
+    <div id="tab-material" class="tab-content" style="display:flex; flex-direction:column; overflow:hidden; flex:1;">
+
+      <!-- Mesh selector -->
+      <div class="mesh-selector">
+        <label>Seçili Mesh</label>
+        <select id="mesh-select">
+          <option value="">— Model yükleyin —</option>
+        </select>
+      </div>
+
+      <!-- Scrollable controls -->
+      <div class="panel-scroll" id="material-controls">
+        <div class="empty-state" id="empty-state">
+          <div class="empty-state-icon">◈</div>
+          <p>Bir GLB modeli açın ve<br>mesh seçerek materyali düzenleyin</p>
+        </div>
+
+        <!-- PBR Section -->
+        <div class="section" id="sec-pbr">
+          <div class="section-header" onclick="toggleSection('pbr')">
+            <div class="section-icon icon-pbr">⬡</div>
+            <span class="section-label">PBR Özellikleri</span>
+            <span class="section-chevron">▼</span>
+          </div>
+          <div class="section-body">
+            <!-- Roughness -->
+            <div class="control">
+              <div class="control-row">
+                <span class="control-label">Roughness</span>
+                <div style="display:flex;align-items:center;gap:6px;">
+                  <span class="control-value" id="val-roughness">0.50</span>
+                  <button class="map-clear-btn" id="clear-roughnessMap" onclick="clearMap('roughnessMap')" title="Roughness texture'ını kaldır — slider tam etkili olsun" style="display:none;">× map</button>
+                </div>
+              </div>
+              <input type="range" id="roughness" min="0" max="1" step="0.01" value="0.5"
+                     oninput="updateRoughness(+this.value)">
+            </div>
+            <!-- Metalness -->
+            <div class="control">
+              <div class="control-row">
+                <span class="control-label">Metalness</span>
+                <div style="display:flex;align-items:center;gap:6px;">
+                  <span class="control-value" id="val-metalness">0.00</span>
+                  <button class="map-clear-btn" id="clear-metalnessMap" onclick="clearMap('metalnessMap')" title="Metalness texture'ını kaldır" style="display:none;">× map</button>
+                </div>
+              </div>
+              <input type="range" id="metalness" min="0" max="1" step="0.01" value="0"
+                     oninput="updateMetalness(+this.value)">
+            </div>
+            <!-- IOR -->
+            <div class="control">
+              <div class="control-row">
+                <span class="control-label">IOR (Refraksiyon)</span>
+                <span class="control-value" id="val-ior">1.50</span>
+              </div>
+              <input type="range" id="ior" min="1" max="2.5" step="0.01" value="1.5"
+                     oninput="updateMaterial('ior', +this.value)">
+            </div>
+            <!-- Reflectivity -->
+            <div class="control">
+              <div class="control-row">
+                <span class="control-label">Reflectivity</span>
+                <span class="control-value" id="val-reflectivity">0.50</span>
+              </div>
+              <input type="range" id="reflectivity" min="0" max="1" step="0.01" value="0.5"
+                     oninput="updateMaterial('reflectivity', +this.value)">
+            </div>
+            <!-- Env Map Intensity -->
+            <div class="control">
+              <div class="control-row">
+                <span class="control-label" style="display:flex;align-items:center;gap:5px;">
+                  Env Map Intensity
+                  <span style="font-size:10px;background:rgba(248,113,113,0.15);color:#f87171;border-radius:4px;padding:1px 5px;font-weight:700;">cilalı</span>
+                </span>
+                <span class="control-value" id="val-envMapIntensity">1.00</span>
+              </div>
+              <input type="range" id="envMapIntensity" min="0" max="3" step="0.01" value="1"
+                     oninput="updateEnvMapIntensity(+this.value)">
+            </div>
+            <!-- Clearcoat -->
+            <div class="control">
+              <div class="control-row">
+                <span class="control-label" style="display:flex;align-items:center;gap:5px;">
+                  Clearcoat
+                  <span style="font-size:10px;background:rgba(248,113,113,0.15);color:#f87171;border-radius:4px;padding:1px 5px;font-weight:700;">cilalı</span>
+                </span>
+                <span class="control-value" id="val-clearcoat">0.00</span>
+              </div>
+              <input type="range" id="clearcoat" min="0" max="1" step="0.01" value="0"
+                     oninput="updateClearcoat(+this.value)">
+            </div>
+            <!-- Clearcoat Roughness -->
+            <div class="control">
+              <div class="control-row">
+                <span class="control-label">Clearcoat Roughness</span>
+                <span class="control-value" id="val-clearcoatRoughness">0.00</span>
+              </div>
+              <input type="range" id="clearcoatRoughness" min="0" max="1" step="0.01" value="0"
+                     oninput="updateClearcoatRoughness(+this.value)">
+            </div>
+          </div>
+        </div>
+
+        <!-- COLOR Section -->
+        <div class="section" id="sec-color">
+          <div class="section-header" onclick="toggleSection('color')">
+            <div class="section-icon icon-color">◉</div>
+            <span class="section-label">Renk</span>
+            <span class="section-chevron">▼</span>
+          </div>
+          <div class="section-body">
+            <!-- Base Color -->
+            <div class="control">
+              <div class="control-label" style="margin-bottom:4px;">Base Color</div>
+              <div class="color-control">
+                <div class="color-swatch-wrap">
+                  <div class="color-swatch-bg" id="swatch-color" style="background:#ffffff;"></div>
+                  <input type="color" id="color-picker" value="#ffffff" oninput="updateColor('color', this.value)">
+                </div>
+                <input type="text" class="color-hex" id="hex-color" value="#ffffff"
+                       oninput="handleHexInput('color', this.value)" maxlength="7">
+              </div>
+            </div>
+            <!-- Emissive -->
+            <div class="control">
+              <div class="control-label" style="margin-bottom:4px;">Emissive Renk</div>
+              <div class="color-control">
+                <div class="color-swatch-wrap">
+                  <div class="color-swatch-bg" id="swatch-emissive" style="background:#000000;"></div>
+                  <input type="color" id="emissive-picker" value="#000000" oninput="updateColor('emissive', this.value)">
+                </div>
+                <input type="text" class="color-hex" id="hex-emissive" value="#000000"
+                       oninput="handleHexInput('emissive', this.value)" maxlength="7">
+              </div>
+            </div>
+            <!-- Emissive Intensity -->
+            <div class="control">
+              <div class="control-row">
+                <span class="control-label">Emissive Intensity</span>
+                <span class="control-value" id="val-emissiveIntensity">1.00</span>
+              </div>
+              <input type="range" id="emissiveIntensity" min="0" max="5" step="0.05" value="1"
+                     oninput="updateMaterial('emissiveIntensity', +this.value)">
+            </div>
+          </div>
+        </div>
+
+        <!-- ALPHA Section -->
+        <div class="section" id="sec-alpha">
+          <div class="section-header" onclick="toggleSection('alpha')">
+            <div class="section-icon icon-alpha">◌</div>
+            <span class="section-label">Şeffaflık & Alpha</span>
+            <span class="section-chevron">▼</span>
+          </div>
+          <div class="section-body">
+            <div class="toggle-row">
+              <span class="toggle-label">Transparent</span>
+              <label class="toggle">
+                <input type="checkbox" id="transparent" onchange="updateMaterial('transparent', this.checked)">
+                <div class="toggle-track"></div>
+              </label>
+            </div>
+            <div class="control">
+              <div class="control-row">
+                <span class="control-label">Opacity</span>
+                <span class="control-value" id="val-opacity">1.00</span>
+              </div>
+              <input type="range" id="opacity" min="0" max="1" step="0.01" value="1"
+                     oninput="updateMaterial('opacity', +this.value)">
+            </div>
+            <div class="control">
+              <div class="control-label" style="margin-bottom:6px;">Alpha Mode</div>
+              <select class="select-control" id="alphaMode" onchange="updateAlphaMode(this.value)">
+                <option value="OPAQUE">Opaque</option>
+                <option value="BLEND">Blend</option>
+                <option value="MASK">Mask</option>
+              </select>
+            </div>
+            <div class="control" id="alphaCutoff-wrap" style="display:none;">
+              <div class="control-row">
+                <span class="control-label">Alpha Cutoff</span>
+                <span class="control-value" id="val-alphaCutoff">0.50</span>
+              </div>
+              <input type="range" id="alphaCutoff" min="0" max="1" step="0.01" value="0.5"
+                     oninput="updateMaterial('alphaTest', +this.value)">
+            </div>
+          </div>
+        </div>
+
+        <!-- NORMAL / DETAIL Section -->
+        <div class="section" id="sec-normal">
+          <div class="section-header" onclick="toggleSection('normal')">
+            <div class="section-icon icon-pbr">⬢</div>
+            <span class="section-label">Normal & Detay</span>
+            <span class="section-chevron">▼</span>
+          </div>
+          <div class="section-body">
+            <div class="control">
+              <div class="control-row">
+                <span class="control-label">Normal Scale</span>
+                <span class="control-value" id="val-normalScale">1.00</span>
+              </div>
+              <input type="range" id="normalScale" min="0" max="3" step="0.01" value="1"
+                     oninput="updateNormalScale(+this.value)">
+            </div>
+            <div class="control">
+              <div class="control-row">
+                <span class="control-label">AO Intensity</span>
+                <span class="control-value" id="val-aoIntensity">1.00</span>
+              </div>
+              <input type="range" id="aoIntensity" min="0" max="1" step="0.01" value="1"
+                     oninput="updateMaterial('aoMapIntensity', +this.value)">
+            </div>
+            <div class="control">
+              <div class="control-row">
+                <span class="control-label">Displacement Scale</span>
+                <span class="control-value" id="val-displacementScale">0.00</span>
+              </div>
+              <input type="range" id="displacementScale" min="0" max="1" step="0.01" value="0"
+                     oninput="updateMaterial('displacementScale', +this.value)">
+            </div>
+            <div class="toggle-row">
+              <span class="toggle-label">Wireframe</span>
+              <label class="toggle">
+                <input type="checkbox" id="wireframe" onchange="updateMaterial('wireframe', this.checked)">
+                <div class="toggle-track"></div>
+              </label>
+            </div>
+            <div class="toggle-row">
+              <span class="toggle-label">FlatShading</span>
+              <label class="toggle">
+                <input type="checkbox" id="flatShading" onchange="updateFlatShading(this.checked)">
+                <div class="toggle-track"></div>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- TEXTURE INFO Section -->
+        <div class="section" id="sec-textures">
+          <div class="section-header" onclick="toggleSection('textures')">
+            <div class="section-icon icon-transform">⬛</div>
+            <span class="section-label">Dokular (Textures)</span>
+            <span class="section-chevron">▼</span>
+          </div>
+          <div class="section-body" id="texture-list">
+            <div style="font-size:12px; color:var(--text-muted);">Mesh seçildiğinde görünür.</div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Footer -->
+      <div class="panel-footer">
+        <button class="btn" id="btn-copy-json" onclick="copyMaterialJSON()" disabled>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+          JSON Kopyala
+        </button>
+        <button class="btn btn-primary" id="btn-reset-mat" onclick="resetMaterial()" disabled>
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10"/></svg>
+          Mat. Sıfırla
+        </button>
+      </div>
+    </div>
+
+    <!-- SCENE TAB -->
+    <div id="tab-scene" class="tab-content" style="display:none; flex-direction:column; overflow:hidden; flex:1;">
+      <div class="panel-scroll">
+
+        <!-- Environment -->
+        <div class="section" id="sec-env">
+          <div class="section-header" onclick="toggleSection('env')">
+            <div class="section-icon icon-scene">◈</div>
+            <span class="section-label">Ortam (Environment)</span>
+            <span class="section-chevron">▼</span>
+          </div>
+          <div class="env-grid">
+            <button class="env-btn active" onclick="setEnvironment('studio')" id="env-studio">🏢 Studio</button>
+            <button class="env-btn" onclick="setEnvironment('sunset')" id="env-sunset">🌅 Sunset</button>
+            <button class="env-btn" onclick="setEnvironment('night')" id="env-night">🌙 Night</button>
+            <button class="env-btn" onclick="setEnvironment('outdoor')" id="env-outdoor">🌿 Outdoor</button>
+            <button class="env-btn" onclick="setEnvironment('warm')" id="env-warm">🕯 Warm</button>
+            <button class="env-btn" onclick="setEnvironment('cold')" id="env-cold">❄ Cold</button>
+          </div>
+        </div>
+
+        <!-- Lights -->
+        <div class="section" id="sec-lights">
+          <div class="section-header" onclick="toggleSection('lights')">
+            <div class="section-icon icon-light">☀</div>
+            <span class="section-label">Işıklar</span>
+            <span class="section-chevron">▼</span>
+          </div>
+          <div class="section-body">
+            <div class="control">
+              <div class="control-row">
+                <span class="control-label">Exposure</span>
+                <span class="control-value" id="val-exposure">1.20</span>
+              </div>
+              <input type="range" id="exposure" min="0.1" max="3" step="0.05" value="1.2"
+                     oninput="updateExposure(+this.value)">
+            </div>
+            <div class="control">
+              <div class="control-row">
+                <span class="control-label">Ambient Light</span>
+                <span class="control-value" id="val-ambient">0.60</span>
+              </div>
+              <input type="range" id="ambient-intensity" min="0" max="3" step="0.05" value="0.6"
+                     oninput="updateLight('ambient', +this.value)">
+            </div>
+            <div class="control">
+              <div class="control-row">
+                <span class="control-label">Directional Light</span>
+                <span class="control-value" id="val-dir">2.00</span>
+              </div>
+              <input type="range" id="dir-intensity" min="0" max="6" step="0.1" value="2"
+                     oninput="updateLight('directional', +this.value)">
+            </div>
+            <div class="control">
+              <div class="control-row">
+                <span class="control-label">Fill Light</span>
+                <span class="control-value" id="val-fill">0.60</span>
+              </div>
+              <input type="range" id="fill-intensity" min="0" max="3" step="0.05" value="0.6"
+                     oninput="updateLight('fill', +this.value)">
+            </div>
+            <div class="control">
+              <div class="control-label" style="margin-bottom:4px;">Ambient Renk</div>
+              <div class="color-control">
+                <div class="color-swatch-wrap">
+                  <div class="color-swatch-bg" id="swatch-ambient" style="background:#ffffff;"></div>
+                  <input type="color" id="ambient-color" value="#ffffff" oninput="updateLightColor('ambient', this.value)">
+                </div>
+                <input type="text" class="color-hex" id="hex-ambient" value="#ffffff"
+                       oninput="handleLightHexInput('ambient', this.value)" maxlength="7">
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Background -->
+        <div class="section" id="sec-bg">
+          <div class="section-header" onclick="toggleSection('bg')">
+            <div class="section-icon icon-color">▣</div>
+            <span class="section-label">Arka Plan</span>
+            <span class="section-chevron">▼</span>
+          </div>
+          <div class="section-body">
+            <div class="control">
+              <div class="control-label" style="margin-bottom:4px;">Arka Plan Rengi</div>
+              <div class="color-control">
+                <div class="color-swatch-wrap">
+                  <div class="color-swatch-bg" id="swatch-bg" style="background:#0f0f13;"></div>
+                  <input type="color" id="bg-color" value="#0f0f13" oninput="updateBackground(this.value)">
+                </div>
+                <input type="text" class="color-hex" id="hex-bg" value="#0f0f13"
+                       oninput="handleBgHexInput(this.value)" maxlength="7">
+              </div>
+            </div>
+            <div class="toggle-row">
+              <span class="toggle-label">Grid Göster</span>
+              <label class="toggle">
+                <input type="checkbox" id="show-grid" onchange="toggleGrid(this.checked)" checked>
+                <div class="toggle-track"></div>
+              </label>
+            </div>
+            <div class="toggle-row">
+              <span class="toggle-label">Gölge Göster</span>
+              <label class="toggle">
+                <input type="checkbox" id="show-shadow" onchange="toggleShadow(this.checked)" checked>
+                <div class="toggle-track"></div>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Transform -->
+        <div class="section" id="sec-transform">
+          <div class="section-header" onclick="toggleSection('transform')">
+            <div class="section-icon icon-transform">↔</div>
+            <span class="section-label">Model Transform</span>
+            <span class="section-chevron">▼</span>
+          </div>
+          <div class="section-body">
+            <div class="control">
+              <div class="control-row">
+                <span class="control-label">Scale</span>
+                <span class="control-value" id="val-scale">1.00</span>
+              </div>
+              <input type="range" id="model-scale" min="0.01" max="5" step="0.01" value="1"
+                     oninput="updateModelScale(+this.value)">
+            </div>
+            <div class="control">
+              <div class="control-row">
+                <span class="control-label">Yükseklik (Y)</span>
+                <span class="control-value" id="val-posy">0.00</span>
+              </div>
+              <input type="range" id="model-posy" min="-2" max="2" step="0.01" value="0"
+                     oninput="updateModelPosY(+this.value)">
+            </div>
+            <div class="toggle-row">
+              <span class="toggle-label">Otomatik Döndür</span>
+              <label class="toggle">
+                <input type="checkbox" id="auto-rotate" onchange="toggleAutoRotate(this.checked)" checked>
+                <div class="toggle-track"></div>
+              </label>
+            </div>
+            <div class="control">
+              <div class="control-row">
+                <span class="control-label">Dönüş Hızı</span>
+                <span class="control-value" id="val-rotspeed">1.00</span>
+              </div>
+              <input type="range" id="rot-speed" min="0" max="5" step="0.1" value="1"
+                     oninput="updateRotSpeed(+this.value)">
+            </div>
+          </div>
+        </div>
+
+        <!-- Scene Info -->
+        <div class="section" id="sec-sceneinfo">
+          <div class="section-header" onclick="toggleSection('sceneinfo')">
+            <div class="section-icon icon-scene">ℹ</div>
+            <span class="section-label">Sahne Bilgisi</span>
+            <span class="section-chevron">▼</span>
+          </div>
+          <div class="scene-info-list" id="scene-info-list">
+            <div class="scene-info-item">
+              <span class="k">Toplam Mesh</span>
+              <span class="v" id="si-meshes">—</span>
+            </div>
+            <div class="scene-info-item">
+              <span class="k">Toplam Triangle</span>
+              <span class="v" id="si-tris">—</span>
+            </div>
+            <div class="scene-info-item">
+              <span class="k">Materyal Sayısı</span>
+              <span class="v" id="si-mats">—</span>
+            </div>
+            <div class="scene-info-item">
+              <span class="k">Texture Sayısı</span>
+              <span class="v" id="si-texs">—</span>
+            </div>
+            <div class="scene-info-item">
+              <span class="k">Dosya Adı</span>
+              <span class="v" id="si-file">—</span>
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- Hidden file input -->
+<input type="file" id="file-input" accept=".glb,.gltf" style="display:none">
+
+<!-- THREE.JS via CDN (ES Module) -->
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.163.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.163.0/examples/jsm/"
+  }
+}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+// RoomEnvironment kaldırıldı — studio env kendi kendine oluşturuluyor
+
+// ──────────────────────────────────────────────
+// SCENE SETUP
+// ──────────────────────────────────────────────
+const canvas = document.getElementById('three-canvas');
+const wrap   = document.getElementById('canvas-wrap');
+
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.2;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+// ── STUDIO ENVIRONMENT (yüksek kontrastlı, roughness farkını belirgin kılar) ──
+function createStudioEnvTexture() {
+  const W = 512, H = 256;
+  const data = new Float32Array(W * H * 4);
+  for (let y = 0; y < H; y++) {
+    for (let x = 0; x < W; x++) {
+      const u = x / W;                          // 0..1 → 0..2π
+      const v = 1 - y / H;                      // 0=bottom, 1=top
+      const theta = u * Math.PI * 2;
+      const phi   = (v - 0.5) * Math.PI;        // -π/2..+π/2
+
+      // Çok düşük ambient — specular kontrast belirgin olsun
+      let r = 0.02, g = 0.02, b = 0.03;
+
+      // Key light — sol üst ön (çok parlak, sıcak beyaz)
+      const kd = Math.hypot(theta - Math.PI*0.25, phi - 0.55);
+      if (kd < 0.5) { const i = Math.pow(1 - kd/0.5, 1.5) * 28; r += i*1.0; g += i*0.95; b += i*0.88; }
+
+      // Rim light — sağ arka (soğuk, sert)
+      const rd = Math.hypot(theta - Math.PI*1.65, phi - 0.1);
+      if (rd < 0.35) { const i = Math.pow(1 - rd/0.35, 2) * 14; r += i*0.6; g += i*0.8; b += i*1.2; }
+
+      // Fill — sol yumuşak (çok düşük, sadece gölgeyi kırıyor)
+      const fd = Math.hypot(theta - Math.PI*0.75, phi - 0.05);
+      if (fd < 0.8)  { const i = Math.pow(1 - fd/0.8, 2) * 3; r += i*0.9; g += i*0.95; b += i*1.0; }
+
+      const idx = (y * W + x) * 4;
+      data[idx]=r; data[idx+1]=g; data[idx+2]=b; data[idx+3]=1;
+    }
+  }
+  const tex = new THREE.DataTexture(data, W, H, THREE.RGBAFormat, THREE.FloatType);
+  tex.mapping = THREE.EquirectangularReflectionMapping;
+  tex.colorSpace = THREE.LinearSRGBColorSpace;
+  tex.needsUpdate = true;
+  return tex;
+}
+
+const pmremGenerator = new THREE.PMREMGenerator(renderer);
+pmremGenerator.compileEquirectangularShader();
+const studioEnvRaw    = createStudioEnvTexture();
+const studioEnvTexture = pmremGenerator.fromEquirectangular(studioEnvRaw).texture;
+studioEnvRaw.dispose();
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color('#0f0f13');
+scene.environment = studioEnvTexture; // envMapIntensity çalışması için gerekli
+
+const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 1000);
+camera.position.set(0, 0.8, 2.5);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.autoRotate = true;
+controls.autoRotateSpeed = 1.0;
+controls.minDistance = 0.1;
+controls.maxDistance = 50;
+
+// ── LIGHTS ──
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
+scene.add(ambientLight);
+
+const dirLight = new THREE.DirectionalLight(0xffffff, 2.0);
+dirLight.position.set(4, 6, 4);
+dirLight.castShadow = true;
+dirLight.shadow.mapSize.set(2048, 2048);
+dirLight.shadow.camera.near = 0.1;
+dirLight.shadow.camera.far = 50;
+dirLight.shadow.camera.left = dirLight.shadow.camera.bottom = -5;
+dirLight.shadow.camera.right = dirLight.shadow.camera.top = 5;
+dirLight.shadow.bias = -0.0001;
+scene.add(dirLight);
+
+const fillLight = new THREE.DirectionalLight(0x8888ff, 0.6);
+fillLight.position.set(-4, 2, -4);
+scene.add(fillLight);
+
+// ── GRID & SHADOW PLANE ──
+const gridHelper = new THREE.GridHelper(10, 20, 0x333344, 0x222233);
+scene.add(gridHelper);
+
+const shadowGeo  = new THREE.PlaneGeometry(10, 10);
+const shadowMat  = new THREE.ShadowMaterial({ opacity: 0.25 });
+const shadowPlane = new THREE.Mesh(shadowGeo, shadowMat);
+shadowPlane.rotation.x = -Math.PI / 2;
+shadowPlane.receiveShadow = true;
+scene.add(shadowPlane);
+
+// ──────────────────────────────────────────────
+// STATE
+// ──────────────────────────────────────────────
+let model       = null;
+let meshes      = [];
+let activeMesh  = null;
+let origMaterials = new Map(); // mesh uuid -> original mat clone
+
+// ──────────────────────────────────────────────
+// RESIZE
+// ──────────────────────────────────────────────
+function resize() {
+  const w = wrap.clientWidth;
+  const h = wrap.clientHeight;
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+}
+resize();
+window.addEventListener('resize', resize);
+
+// ──────────────────────────────────────────────
+// ANIMATION LOOP
+// ──────────────────────────────────────────────
+let raf;
+function animate() {
+  raf = requestAnimationFrame(animate);
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+// ──────────────────────────────────────────────
+// GLB LOADER
+// ──────────────────────────────────────────────
+const loader = new GLTFLoader();
+
+function loadGLB(url, filename) {
+  showSpinner(true);
+  if (model) {
+    scene.remove(model);
+    model = null;
+    meshes = [];
+    activeMesh = null;
+  }
+
+  loader.load(url, (gltf) => {
+    model = gltf.scene;
+
+    // Collect meshes
+    meshes = [];
+    model.traverse(child => {
+      if (child.isMesh) {
+        child.castShadow = true;
+        child.receiveShadow = true;
+        meshes.push(child);
+        // envMapIntensity 0 olarak gelirse env map hiç görünmez — düzelt
+        if (child.material) {
+          // 0 veya çok düşük gelirse specular görünmez — 1'e sabitle
+          if (!child.material.envMapIntensity || child.material.envMapIntensity < 0.1)
+            child.material.envMapIntensity = 1;
+          const orig = child.material.clone();
+          origMaterials.set(child.uuid, orig);
+        }
+      }
+    });
+
+    // Auto-center & scale
+    const box = new THREE.Box3().setFromObject(model);
+    const size = box.getSize(new THREE.Vector3());
+    const center = box.getCenter(new THREE.Vector3());
+    const maxDim = Math.max(size.x, size.y, size.z);
+    const scale = 1.5 / maxDim;
+    model.scale.setScalar(scale);
+    model.position.sub(center.multiplyScalar(scale));
+    model.position.y += size.y * scale * 0.5;
+
+    gridHelper.position.y = -(size.y * scale * 0.5) + model.position.y - size.y * scale * 0.5;
+    shadowPlane.position.y = gridHelper.position.y + 0.001;
+
+    scene.add(model);
+    showSpinner(false);
+    showDropZone(false);
+
+    // Update UI
+    populateMeshSelect();
+    updateSceneInfo(filename);
+
+    // Select first mesh
+    if (meshes.length > 0) {
+      document.getElementById('mesh-select').value = meshes[0].uuid;
+      selectMesh(meshes[0].uuid);
+    }
+
+    // Clearcoat uyarısı — food modellerinde sıkça var ve base roughness'ı etkisiz kılar
+    const hasClearcoat = meshes.some(m => m.material?.clearcoat > 0);
+    if (hasClearcoat) {
+      showToast('⚠ Clearcoat aktif — parlaklık için Clearcoat = 0 yapın', 'warn');
+    }
+
+    // Enable buttons
+    document.getElementById('btn-reset-all').disabled = false;
+    document.getElementById('btn-screenshot').disabled = false;
+    document.getElementById('btn-copy-json').disabled = false;
+    document.getElementById('btn-reset-mat').disabled = false;
+  }, undefined, (err) => {
+    showSpinner(false);
+    showToast('Model yüklenemedi: ' + err.message);
+    console.error(err);
+  });
+}
+
+// ──────────────────────────────────────────────
+// MESH SELECT
+// ──────────────────────────────────────────────
+function populateMeshSelect() {
+  const sel = document.getElementById('mesh-select');
+  sel.innerHTML = '';
+  if (meshes.length === 0) {
+    sel.innerHTML = '<option value="">— Mesh yok —</option>';
+    return;
+  }
+  meshes.forEach((m, i) => {
+    const opt = document.createElement('option');
+    opt.value = m.uuid;
+    opt.textContent = m.name || `Mesh_${i}`;
+    sel.appendChild(opt);
+  });
+}
+
+// ── Array-safe material helpers ──────────────────
+// material tek obje de olabilir, dizi de — ikisini de handle et
+function getFirstMat(mesh) {
+  if (!mesh) return null;
+  return Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+}
+// Aktif mesh'teki tüm materyalleri dizi olarak döner
+function getActiveMats() {
+  if (!activeMesh) return [];
+  return Array.isArray(activeMesh.material) ? activeMesh.material : [activeMesh.material];
+}
+// Tüm aktif materyallere property set et
+function setMatProp(prop, value) {
+  getActiveMats().forEach(m => { m[prop] = value; m.needsUpdate = true; });
+}
+
+function selectMesh(uuid) {
+  const mesh = meshes.find(m => m.uuid === uuid);
+  if (!mesh || !mesh.material) return;
+  activeMesh = mesh;
+
+  document.getElementById('empty-state').style.display = 'none';
+  document.getElementById('sec-pbr').style.display = '';
+  document.getElementById('sec-color').style.display = '';
+  document.getElementById('sec-alpha').style.display = '';
+  document.getElementById('sec-normal').style.display = '';
+  document.getElementById('sec-textures').style.display = '';
+
+  // İlk materyali UI için referans olarak kullan
+  const mat = getFirstMat(mesh);
+  if (!mat) return;
+
+  setSlider('roughness', mat.roughness ?? 0.5);
+  setSlider('metalness', mat.metalness ?? 0);
+  document.getElementById('clear-roughnessMap').style.display = mat.roughnessMap ? 'inline-block' : 'none';
+  document.getElementById('clear-metalnessMap').style.display = mat.metalnessMap ? 'inline-block' : 'none';
+  setSlider('ior', mat.ior ?? 1.5);
+  setSlider('reflectivity', mat.reflectivity ?? 0.5);
+  setSlider('envMapIntensity', mat.envMapIntensity ?? 1);
+  setSlider('clearcoat', mat.clearcoat ?? 0);
+  setSlider('clearcoatRoughness', mat.clearcoatRoughness ?? 0);
+  setSlider('opacity', mat.opacity ?? 1);
+  setSlider('emissiveIntensity', mat.emissiveIntensity ?? 1);
+  setSlider('normalScale', mat.normalScale ? mat.normalScale.x : 1);
+  setSlider('aoIntensity', mat.aoMapIntensity ?? 1);
+  setSlider('displacementScale', mat.displacementScale ?? 0);
+
+  setColorPicker('color', mat.color ? '#' + mat.color.getHexString() : '#ffffff');
+  setColorPicker('emissive', mat.emissive ? '#' + mat.emissive.getHexString() : '#000000');
+
+  document.getElementById('transparent').checked = mat.transparent ?? false;
+  document.getElementById('wireframe').checked = mat.wireframe ?? false;
+  document.getElementById('flatShading').checked = mat.flatShading ?? false;
+
+  updateAlphaModeUI(mat);
+  buildTextureList(mat);
+
+  // Debug: konsola materyal bilgisi bas
+  console.log('[Material]', {
+    type: mat.type,
+    roughness: mat.roughness,
+    metalness: mat.metalness,
+    clearcoat: mat.clearcoat,
+    envMapIntensity: mat.envMapIntensity,
+    hasRoughnessMap: !!mat.roughnessMap,
+    isArray: Array.isArray(mesh.material),
+    count: Array.isArray(mesh.material) ? mesh.material.length : 1,
+  });
+}
+
+document.getElementById('mesh-select').addEventListener('change', function() {
+  selectMesh(this.value);
+});
+
+// ──────────────────────────────────────────────
+// MATERIAL UPDATE HELPERS  (array-safe)
+// ──────────────────────────────────────────────
+window.updateMaterial = function(prop, value) {
+  if (!activeMesh) return;
+  setMatProp(prop, value);
+  const valEl = document.getElementById('val-' + prop);
+  if (valEl) valEl.textContent = typeof value === 'boolean' ? '' : value.toFixed(2);
+};
+
+window.updateColor = function(prop, hex) {
+  if (!activeMesh) return;
+  getActiveMats().forEach(m => {
+    if (prop === 'color'    && m.color)    m.color.set(hex);
+    if (prop === 'emissive' && m.emissive) m.emissive.set(hex);
+    m.needsUpdate = true;
+  });
+  document.getElementById('swatch-' + prop).style.background = hex;
+  document.getElementById('hex-' + prop).value = hex;
+};
+
+window.handleHexInput = function(prop, val) {
+  if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+    document.getElementById(prop === 'color' ? 'color-picker' : 'emissive-picker').value = val;
+    updateColor(prop, val);
+  }
+};
+
+// Roughness — roughnessMap'i otomatik kaldır, slider tam etkili olsun
+window.updateRoughness = function(v) {
+  if (!activeMesh) return;
+  getActiveMats().forEach(m => {
+    m.roughnessMap = null;   // map varsa sil — slider doğrudan çalışsın
+    m.roughness = v;
+    m.needsUpdate = true;
+  });
+  document.getElementById('clear-roughnessMap').style.display = 'none';
+  document.getElementById('val-roughness').textContent = v.toFixed(2);
+};
+
+// Metalness — metalnessMap'i otomatik kaldır
+window.updateMetalness = function(v) {
+  if (!activeMesh) return;
+  getActiveMats().forEach(m => {
+    m.metalnessMap = null;
+    m.metalness = v;
+    m.needsUpdate = true;
+  });
+  document.getElementById('clear-metalnessMap').style.display = 'none';
+  document.getElementById('val-metalness').textContent = v.toFixed(2);
+};
+
+window.clearMap = function(mapName) {
+  if (!activeMesh) return;
+  getActiveMats().forEach(m => { m[mapName] = null; m.needsUpdate = true; });
+  const btn = document.getElementById('clear-' + mapName);
+  if (btn) btn.style.display = 'none';
+};
+
+window.updateEnvMapIntensity = function(v) {
+  if (!activeMesh) return;
+  setMatProp('envMapIntensity', v);
+  document.getElementById('val-envMapIntensity').textContent = v.toFixed(2);
+};
+
+window.updateClearcoat = function(v) {
+  if (!activeMesh) return;
+  setMatProp('clearcoat', v);
+  document.getElementById('val-clearcoat').textContent = v.toFixed(2);
+};
+
+window.updateClearcoatRoughness = function(v) {
+  if (!activeMesh) return;
+  setMatProp('clearcoatRoughness', v);
+  document.getElementById('val-clearcoatRoughness').textContent = v.toFixed(2);
+};
+
+window.updateNormalScale = function(v) {
+  if (!activeMesh) return;
+  getActiveMats().forEach(m => { if (m.normalScale) m.normalScale.set(v, v); });
+  document.getElementById('val-normalScale').textContent = v.toFixed(2);
+};
+
+window.updateFlatShading = function(v) {
+  if (!activeMesh) return;
+  setMatProp('flatShading', v);
+};
+
+window.updateAlphaMode = function(mode) {
+  if (!activeMesh) return;
+  getActiveMats().forEach(m => {
+    if (mode === 'OPAQUE') { m.transparent = false; m.alphaTest = 0; }
+    if (mode === 'BLEND')  { m.transparent = true;  m.alphaTest = 0; }
+    if (mode === 'MASK')   { m.transparent = false; m.alphaTest = 0.5; }
+    m.needsUpdate = true;
+  });
+  document.getElementById('alphaCutoff-wrap').style.display = mode === 'MASK' ? '' : 'none';
+  document.getElementById('transparent').checked = mode === 'BLEND';
+};
+
+function updateAlphaModeUI(mat) {
+  const sel = document.getElementById('alphaMode');
+  if (!mat.transparent && mat.alphaTest === 0) sel.value = 'OPAQUE';
+  else if (mat.transparent) sel.value = 'BLEND';
+  else sel.value = 'MASK';
+  document.getElementById('alphaCutoff-wrap').style.display = sel.value === 'MASK' ? '' : 'none';
+}
+
+// ──────────────────────────────────────────────
+// LIGHT CONTROLS
+// ──────────────────────────────────────────────
+window.updateExposure = function(v) {
+  renderer.toneMappingExposure = v;
+  document.getElementById('val-exposure').textContent = v.toFixed(2);
+};
+
+window.updateLight = function(type, value) {
+  if (type === 'ambient')      { ambientLight.intensity = value; document.getElementById('val-ambient').textContent = value.toFixed(2); }
+  if (type === 'directional')  { dirLight.intensity = value; document.getElementById('val-dir').textContent = value.toFixed(2); }
+  if (type === 'fill')         { fillLight.intensity = value; document.getElementById('val-fill').textContent = value.toFixed(2); }
+};
+
+window.updateLightColor = function(type, hex) {
+  if (type === 'ambient') {
+    ambientLight.color.set(hex);
+    document.getElementById('swatch-ambient').style.background = hex;
+    document.getElementById('hex-ambient').value = hex;
+  }
+};
+
+window.handleLightHexInput = function(type, val) {
+  if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+    document.getElementById('ambient-color').value = val;
+    updateLightColor(type, val);
+  }
+};
+
+// ──────────────────────────────────────────────
+// SCENE CONTROLS
+// ──────────────────────────────────────────────
+window.updateBackground = function(hex) {
+  scene.background = new THREE.Color(hex);
+  document.getElementById('swatch-bg').style.background = hex;
+  document.getElementById('hex-bg').value = hex;
+};
+
+window.handleBgHexInput = function(val) {
+  if (/^#[0-9A-Fa-f]{6}$/.test(val)) {
+    document.getElementById('bg-color').value = val;
+    updateBackground(val);
+  }
+};
+
+window.toggleGrid = function(v) { gridHelper.visible = v; };
+window.toggleShadow = function(v) { shadowPlane.visible = v; };
+
+window.updateModelScale = function(v) {
+  if (!model) return;
+  model.scale.setScalar(v);
+  document.getElementById('val-scale').textContent = v.toFixed(2);
+};
+
+window.updateModelPosY = function(v) {
+  if (!model) return;
+  model.position.y = v;
+  document.getElementById('val-posy').textContent = v.toFixed(2);
+};
+
+function syncRotateUI(v) {
+  controls.autoRotate = v;
+  // Floating button
+  const btn = document.getElementById('rotate-btn');
+  btn.classList.toggle('active', v);
+  // Sahne sekmesindeki checkbox
+  const chk = document.getElementById('auto-rotate');
+  if (chk) chk.checked = v;
+}
+
+window.toggleAutoRotate = function(v) { syncRotateUI(v); };
+
+window.clickRotateBtn = function() { syncRotateUI(!controls.autoRotate); };
+
+window.updateRotSpeed = function(v) {
+  controls.autoRotateSpeed = v;
+  document.getElementById('val-rotspeed').textContent = v.toFixed(2);
+};
+
+// ──────────────────────────────────────────────
+// ENVIRONMENT PRESETS
+// ──────────────────────────────────────────────
+const envPresets = {
+  studio:  { bg: '#1a1a22', ambient: 0.6, dir: 2.0,  fill: 0.6,  ambCol: '#ffffff', dirCol: '#ffffff', fillCol: '#8888ff' },
+  sunset:  { bg: '#1a0f05', ambient: 0.4, dir: 1.5,  fill: 0.3,  ambCol: '#ff9966', dirCol: '#ffcc88', fillCol: '#ff6633' },
+  night:   { bg: '#05050f', ambient: 0.2, dir: 0.5,  fill: 0.2,  ambCol: '#3344aa', dirCol: '#4455cc', fillCol: '#223388' },
+  outdoor: { bg: '#0d1a0a', ambient: 0.7, dir: 2.5,  fill: 0.5,  ambCol: '#aaccff', dirCol: '#ffffff', fillCol: '#88ccff' },
+  warm:    { bg: '#100a00', ambient: 0.5, dir: 1.8,  fill: 0.4,  ambCol: '#ffcc88', dirCol: '#ffaa55', fillCol: '#ff8822' },
+  cold:    { bg: '#050a14', ambient: 0.5, dir: 1.5,  fill: 0.5,  ambCol: '#aaccff', dirCol: '#ccddff', fillCol: '#6688bb' },
+};
+
+window.setEnvironment = function(key) {
+  const p = envPresets[key];
+  if (!p) return;
+
+  scene.background = new THREE.Color(p.bg);
+  ambientLight.intensity = p.ambient;
+  ambientLight.color.set(p.ambCol);
+  dirLight.intensity = p.dir;
+  dirLight.color.set(p.dirCol);
+  fillLight.intensity = p.fill;
+  fillLight.color.set(p.fillCol);
+
+  // UI sync
+  document.getElementById('swatch-bg').style.background = p.bg;
+  document.getElementById('hex-bg').value = p.bg;
+  document.getElementById('bg-color').value = p.bg;
+  document.getElementById('val-ambient').textContent = p.ambient.toFixed(2);
+  document.getElementById('ambient-intensity').value = p.ambient;
+  document.getElementById('val-dir').textContent = p.dir.toFixed(2);
+  document.getElementById('dir-intensity').value = p.dir;
+  document.getElementById('val-fill').textContent = p.fill.toFixed(2);
+  document.getElementById('fill-intensity').value = p.fill;
+  document.getElementById('swatch-ambient').style.background = p.ambCol;
+  document.getElementById('hex-ambient').value = p.ambCol;
+  document.getElementById('ambient-color').value = p.ambCol;
+
+  // Toggle buttons
+  document.querySelectorAll('.env-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('env-' + key)?.classList.add('active');
+};
+
+// ──────────────────────────────────────────────
+// RESET
+// ──────────────────────────────────────────────
+window.resetMaterial = function() {
+  if (!activeMesh) return;
+  const orig = origMaterials.get(activeMesh.uuid);
+  if (!orig) return;
+  // Eski materyalleri dispose et (array da olabilir)
+  const old = activeMesh.material;
+  (Array.isArray(old) ? old : [old]).forEach(m => m.dispose());
+  activeMesh.material = orig.clone();
+  selectMesh(activeMesh.uuid);
+};
+
+document.getElementById('btn-reset-all').addEventListener('click', () => {
+  meshes.forEach(m => {
+    const orig = origMaterials.get(m.uuid);
+    if (orig) {
+      m.material.dispose();
+      m.material = orig.clone();
+    }
+  });
+  if (activeMesh) selectMesh(activeMesh.uuid);
+  setEnvironment('studio');
+  document.getElementById('model-scale').value = 1;
+  document.getElementById('model-posy').value = 0;
+  if (model) {
+    model.scale.setScalar(1);
+    model.position.y = 0;
+  }
+  document.getElementById('val-scale').textContent = '1.00';
+  document.getElementById('val-posy').textContent = '0.00';
+});
+
+// ──────────────────────────────────────────────
+// COPY JSON
+// ──────────────────────────────────────────────
+window.copyMaterialJSON = function() {
+  if (!activeMesh) return;
+  const mat = getFirstMat(activeMesh);
+  const data = {
+    name: mat.name,
+    roughness: mat.roughness,
+    metalness: mat.metalness,
+    color: mat.color ? '#' + mat.color.getHexString() : null,
+    emissive: mat.emissive ? '#' + mat.emissive.getHexString() : null,
+    emissiveIntensity: mat.emissiveIntensity,
+    opacity: mat.opacity,
+    transparent: mat.transparent,
+    ior: mat.ior,
+    reflectivity: mat.reflectivity,
+    wireframe: mat.wireframe,
+    flatShading: mat.flatShading,
+  };
+  navigator.clipboard.writeText(JSON.stringify(data, null, 2))
+    .then(() => showToast('JSON kopyalandı!', 'success'))
+    .catch(() => showToast('Kopyalama başarısız'));
+};
+
+// ──────────────────────────────────────────────
+// SCREENSHOT
+// ──────────────────────────────────────────────
+document.getElementById('btn-screenshot').addEventListener('click', () => {
+  renderer.render(scene, camera);
+  const url = renderer.domElement.toDataURL('image/png');
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'model-render.png';
+  a.click();
+});
+
+// ──────────────────────────────────────────────
+// TEXTURE INFO
+// ──────────────────────────────────────────────
+function buildTextureList(mat) {
+  const list = document.getElementById('texture-list');
+  const maps = [
+    { key: 'map',              label: 'Base Color Map' },
+    { key: 'roughnessMap',     label: 'Roughness Map' },
+    { key: 'metalnessMap',     label: 'Metalness Map' },
+    { key: 'normalMap',        label: 'Normal Map' },
+    { key: 'aoMap',            label: 'AO Map' },
+    { key: 'emissiveMap',      label: 'Emissive Map' },
+    { key: 'displacementMap',  label: 'Displacement Map' },
+    { key: 'alphaMap',         label: 'Alpha Map' },
+  ];
+
+  const present = maps.filter(m => mat[m.key]);
+  if (present.length === 0) {
+    list.innerHTML = '<div style="font-size:12px; color:var(--text-muted);">Bu mesh\'te doku yok.</div>';
+    return;
+  }
+
+  list.innerHTML = present.map(m => `
+    <div class="texture-slot">
+      <div class="texture-thumb" style="background:var(--border); font-size:9px; color:var(--text-muted);">◈</div>
+      <div class="texture-info">
+        <div class="texture-name">${m.label}</div>
+        <div class="texture-sub">${mat[m.key].image?.width || '?'}×${mat[m.key].image?.height || '?'} px</div>
+      </div>
+    </div>
+  `).join('');
+}
+
+// ──────────────────────────────────────────────
+// SCENE INFO
+// ──────────────────────────────────────────────
+function updateSceneInfo(filename) {
+  let tris = 0;
+  const mats = new Set();
+  const texs = new Set();
+  meshes.forEach(m => {
+    if (m.geometry.index) tris += m.geometry.index.count / 3;
+    else tris += m.geometry.attributes.position.count / 3;
+    if (m.material) {
+      mats.add(m.material.uuid);
+      ['map','roughnessMap','metalnessMap','normalMap','aoMap','emissiveMap'].forEach(k => {
+        if (m.material[k]) texs.add(m.material[k].uuid);
+      });
+    }
+  });
+
+  document.getElementById('si-meshes').textContent = meshes.length;
+  document.getElementById('si-tris').textContent = Math.round(tris).toLocaleString();
+  document.getElementById('si-mats').textContent = mats.size;
+  document.getElementById('si-texs').textContent = texs.size;
+  document.getElementById('si-file').textContent = filename || '—';
+
+  document.getElementById('info-name').textContent = filename?.replace(/\.[^.]+$/, '') || '—';
+  document.getElementById('info-meshes').textContent = meshes.length;
+  document.getElementById('info-tris').textContent = Math.round(tris).toLocaleString();
+  document.getElementById('canvas-info').style.display = 'flex';
+}
+
+// ──────────────────────────────────────────────
+// UI HELPERS
+// ──────────────────────────────────────────────
+function setSlider(id, value) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  el.value = value;
+  const valEl = document.getElementById('val-' + id);
+  if (valEl) valEl.textContent = (+value).toFixed(2);
+}
+
+function setColorPicker(prop, hex) {
+  const picker = document.getElementById(prop === 'color' ? 'color-picker' : 'emissive-picker');
+  if (picker) picker.value = hex;
+  const swatch = document.getElementById('swatch-' + prop);
+  if (swatch) swatch.style.background = hex;
+  const hexEl = document.getElementById('hex-' + prop);
+  if (hexEl) hexEl.value = hex;
+}
+
+function showSpinner(v) {
+  document.getElementById('spinner').classList.toggle('active', v);
+}
+
+function showDropZone(v) {
+  document.getElementById('drop-overlay').style.display = v ? 'flex' : 'none';
+}
+
+let toastTimer;
+function showToast(msg, type = 'error') {
+  if (!msg) return;
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  if (type === 'success') { t.style.background='#0d2b1f'; t.style.borderColor='var(--success)'; t.style.color='var(--success)'; }
+  else if (type === 'warn') { t.style.background='#1f1a00'; t.style.borderColor='#fbbf24'; t.style.color='#fbbf24'; }
+  else { t.style.background='#2d1b1b'; t.style.borderColor='var(--danger)'; t.style.color='var(--danger)'; }
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), 5000);
+}
+
+// ──────────────────────────────────────────────
+// SECTION TOGGLE
+// ──────────────────────────────────────────────
+window.toggleSection = function(id) {
+  document.getElementById('sec-' + id)?.classList.toggle('collapsed');
+};
+
+// Hide material sections initially
+['sec-pbr','sec-color','sec-alpha','sec-normal','sec-textures'].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.style.display = 'none';
+});
+
+// ──────────────────────────────────────────────
+// TABS
+// ──────────────────────────────────────────────
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.tab-content').forEach(c => c.style.display = 'none');
+    tab.classList.add('active');
+    const target = document.getElementById('tab-' + tab.dataset.tab);
+    if (target) { target.style.display = 'flex'; }
+  });
+});
+
+// ──────────────────────────────────────────────
+// FILE UPLOAD
+// ──────────────────────────────────────────────
+const fileInput = document.getElementById('file-input');
+
+fileInput.addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const url = URL.createObjectURL(file);
+  loadGLB(url, file.name);
+  fileInput.value = '';
+});
+
+document.getElementById('btn-upload').addEventListener('click', () => fileInput.click());
+document.getElementById('drop-zone').addEventListener('click', () => fileInput.click());
+
+// Drag & Drop
+const dropZone = document.getElementById('drop-zone');
+const canvasWrap = document.getElementById('canvas-wrap');
+
+canvasWrap.addEventListener('dragover', (e) => {
+  e.preventDefault();
+  dropZone.classList.add('drag-over');
+});
+
+canvasWrap.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+
+canvasWrap.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  const file = e.dataTransfer.files[0];
+  if (file && (file.name.endsWith('.glb') || file.name.endsWith('.gltf'))) {
+    const url = URL.createObjectURL(file);
+    loadGLB(url, file.name);
+  } else {
+    showToast('Lütfen .glb veya .gltf dosyası yükleyin');
+  }
+});
+
+// ──────────────────────────────────────────────
+// KEYBOARD SHORTCUTS
+// ──────────────────────────────────────────────
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'r' || e.key === 'R') controls.reset?.();
+  if (e.key === 'f' || e.key === 'F') {
+    if (model) {
+      const box = new THREE.Box3().setFromObject(model);
+      const size = box.getSize(new THREE.Vector3());
+      const center = box.getCenter(new THREE.Vector3());
+      camera.position.set(center.x, center.y, size.length() * 1.5);
+      controls.target.copy(center);
+    }
+  }
+});
+</script>
+
+</body>
+</html>
