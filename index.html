@@ -2277,15 +2277,29 @@ window.exportUSDZ = async function() {
   if (!model) return;
   showToast('USDZ oluşturuluyor...', 'warn');
 
-  // Export anında model.scale = exportScaleFactor (autoFit olmadan)
+  // Export anında model.scale = exportScaleFactor (autoFit olmadan — AR doğru boyut)
   const displayScale = model.scale.x;
   model.scale.setScalar(exportScaleFactor);
 
   try {
-    // parseAsync (r153+) varsa kullan, yoksa parse() fallback
-    const result = typeof usdzExporter.parseAsync === 'function'
-      ? await usdzExporter.parseAsync(model)
-      : usdzExporter.parse(model);
+    // Her çağrıda taze instance — stale state ve method-binding sorunlarını önler
+    const exp = new USDZExporter();
+    let result;
+
+    if (typeof exp.parseAsync === 'function') {
+      // three.js r153+ — async, returns Promise<Uint8Array>
+      result = await exp.parseAsync(model);
+    } else if (typeof exp.parse === 'function') {
+      // Eski sürüm — sync veya async olabilir, ikisini de handle et
+      const raw = exp.parse(model);
+      result = (raw instanceof Promise) ? await raw : raw;
+    } else {
+      throw new Error('USDZExporter API bulunamadı (three.js sürüm uyumsuzluğu)');
+    }
+
+    if (!result || result.byteLength === 0) {
+      throw new Error('Boş USDZ verisi oluşturuldu — model geometri sorunu olabilir');
+    }
 
     model.scale.setScalar(displayScale);
     const blob = new Blob([result], { type: 'model/vnd.usdz+zip' });
@@ -2299,7 +2313,7 @@ window.exportUSDZ = async function() {
   } catch (err) {
     model.scale.setScalar(displayScale);
     showToast('USDZ hatası: ' + err.message);
-    console.error(err);
+    console.error('[USDZ Export]', err);
   }
 };
 
