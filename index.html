@@ -727,6 +727,61 @@
     .icon-alpha { background: rgba(99,179,237,0.15); color: #63b3ed; }
     .icon-scene { background: rgba(167,139,250,0.15); color: #c084fc; }
 
+    /* ── SIZE LOCK BUTTON ── */
+    .size-lock-btn {
+      font-size: 10px;
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: 5px;
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      color: var(--text-muted);
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.15s;
+    }
+    .size-lock-btn.locked { border-color: var(--accent); color: var(--accent2); }
+    .size-lock-btn:hover { border-color: var(--accent); }
+
+    /* ── DIMENSION INPUTS ROW ── */
+    .dim-row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 5px;
+    }
+    .dim-field {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      align-items: center;
+    }
+    .dim-label {
+      font-size: 10px;
+      color: var(--text-muted);
+      font-weight: 600;
+      letter-spacing: 0.3px;
+    }
+    .dim-field input {
+      width: 100%;
+      text-align: center;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      color: var(--text);
+      padding: 5px 4px;
+      font-size: 12px;
+      font-family: monospace;
+    }
+    .dim-field input:focus { outline: none; border-color: var(--accent); }
+
+    /* ── EXPORT BUTTON colors ── */
+    .btn-usdz {
+      background: rgba(52,211,153,0.15);
+      border-color: rgba(52,211,153,0.4);
+      color: #34d399;
+    }
+    .btn-usdz:hover { background: rgba(52,211,153,0.28); border-color: #34d399; }
+
     /* Responsive: mobile collapse panel */
     @media (max-width: 700px) {
       .side-panel { width: 260px; }
@@ -745,6 +800,14 @@
     <button class="btn" id="btn-upload" title="GLB dosyası aç">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
       GLB Aç
+    </button>
+    <button class="btn" id="btn-export-glb" title="Materyalleri ile GLB olarak indir" disabled>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+      GLB İndir
+    </button>
+    <button class="btn btn-usdz" id="btn-export-usdz" title="USDZ (AR) olarak indir" disabled>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+      USDZ İndir
     </button>
     <button class="btn" id="btn-screenshot" title="Ekran görüntüsü al" disabled>
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
@@ -1208,6 +1271,28 @@
               <input type="range" id="model-scale" min="0.01" max="5" step="0.01" value="1"
                      oninput="updateModelScale(+this.value)">
             </div>
+            <!-- Boyut (cm) — model yüklenince görünür -->
+            <div class="control" id="dims-wrap" style="display:none;">
+              <div class="control-row" style="margin-bottom:6px;">
+                <span class="control-label">Boyut (cm)</span>
+                <button class="size-lock-btn locked" id="size-lock-btn" onclick="toggleSizeLock()" title="En-boy oranını kilitle / serbest bırak">🔒 Kilitli</button>
+              </div>
+              <div class="dim-row">
+                <div class="dim-field">
+                  <span class="dim-label">G — cm</span>
+                  <input type="number" id="dim-w" step="0.1" min="0.01" oninput="applyDimCm('w', +this.value)">
+                </div>
+                <div class="dim-field">
+                  <span class="dim-label">Y — cm</span>
+                  <input type="number" id="dim-h" step="0.1" min="0.01" oninput="applyDimCm('h', +this.value)">
+                </div>
+                <div class="dim-field">
+                  <span class="dim-label">D — cm</span>
+                  <input type="number" id="dim-d" step="0.1" min="0.01" oninput="applyDimCm('d', +this.value)">
+                </div>
+              </div>
+            </div>
+
             <div class="control">
               <div class="control-row">
                 <span class="control-label">Yükseklik (Y)</span>
@@ -1286,9 +1371,11 @@
 
 <script type="module">
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { GLTFLoader }    from 'three/addons/loaders/GLTFLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
-import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+import { RGBELoader }    from 'three/addons/loaders/RGBELoader.js';
+import { USDZExporter }  from 'three/addons/exporters/USDZExporter.js';
+import { GLTFExporter }  from 'three/addons/exporters/GLTFExporter.js';
 // RoomEnvironment kaldırıldı — studio env kendi kendine oluşturuluyor
 
 // ──────────────────────────────────────────────
@@ -1396,10 +1483,15 @@ scene.add(shadowPlane);
 // ──────────────────────────────────────────────
 // STATE
 // ──────────────────────────────────────────────
-let model       = null;
-let meshes      = [];
-let activeMesh  = null;
+let model         = null;
+let meshes        = [];
+let activeMesh    = null;
 let origMaterials = new Map(); // mesh uuid -> original mat clone
+let modelOrigSizeM = null;     // GLB orijinal boyutu (metre) — ölçeklemeden önce
+let currentFileName = '';      // Yüklü dosya adı
+let sizeLocked  = true;        // Boyut girişleri: oran kilitli mi?
+const usdzExporter = new USDZExporter();
+const glbExporter  = new GLTFExporter();
 
 // ──────────────────────────────────────────────
 // RESIZE
@@ -1466,9 +1558,18 @@ function loadGLB(url, filename) {
     const center = box.getCenter(new THREE.Vector3());
     const maxDim = Math.max(size.x, size.y, size.z);
     const scale = 1.5 / maxDim;
+
+    // Orijinal boyutu kaydet (scale uygulanmadan önce — 1 birim = 1 metre)
+    modelOrigSizeM = { x: size.x, y: size.y, z: size.z };
+    currentFileName = filename || '';
+
     model.scale.setScalar(scale);
     model.position.sub(center.multiplyScalar(scale));
     model.position.y += size.y * scale * 0.5;
+
+    // Scale slider'ı gerçek değerle güncelle
+    document.getElementById('model-scale').value = Math.min(5, Math.max(0.01, scale));
+    document.getElementById('val-scale').textContent = scale.toFixed(3);
 
     gridHelper.position.y = -(size.y * scale * 0.5) + model.position.y - size.y * scale * 0.5;
     shadowPlane.position.y = gridHelper.position.y + 0.001;
@@ -1480,6 +1581,10 @@ function loadGLB(url, filename) {
     // Update UI
     populateMeshSelect();
     updateSceneInfo(filename);
+
+    // Boyut (cm) göster
+    document.getElementById('dims-wrap').style.display = '';
+    updateSizeCmUI();
 
     // Select first mesh
     if (meshes.length > 0) {
@@ -1498,6 +1603,8 @@ function loadGLB(url, filename) {
     document.getElementById('btn-screenshot').disabled = false;
     document.getElementById('btn-copy-json').disabled = false;
     document.getElementById('btn-reset-mat').disabled = false;
+    document.getElementById('btn-export-glb').disabled = false;
+    document.getElementById('btn-export-usdz').disabled = false;
   }, undefined, (err) => {
     showSpinner(false);
     showToast('Model yüklenemedi: ' + err.message);
@@ -1756,7 +1863,8 @@ window.toggleShadow = function(v) { shadowPlane.visible = v; };
 window.updateModelScale = function(v) {
   if (!model) return;
   model.scale.setScalar(v);
-  document.getElementById('val-scale').textContent = v.toFixed(2);
+  document.getElementById('val-scale').textContent = v.toFixed(3);
+  updateSizeCmUI();
 };
 
 window.updateModelPosY = function(v) {
@@ -2066,6 +2174,100 @@ canvasWrap.addEventListener('drop', (e) => {
     showToast('Lütfen .glb veya .gltf dosyası yükleyin');
   }
 });
+
+// ──────────────────────────────────────────────
+// BOYUT (CM) — MODEL SIZE EDITING
+// ──────────────────────────────────────────────
+function updateSizeCmUI() {
+  if (!model || !modelOrigSizeM) return;
+  const sx = model.scale.x, sy = model.scale.y, sz = model.scale.z;
+  document.getElementById('dim-w').value = (modelOrigSizeM.x * sx * 100).toFixed(1);
+  document.getElementById('dim-h').value = (modelOrigSizeM.y * sy * 100).toFixed(1);
+  document.getElementById('dim-d').value = (modelOrigSizeM.z * sz * 100).toFixed(1);
+}
+
+window.applyDimCm = function(which, valueCm) {
+  if (!model || !modelOrigSizeM || !valueCm || valueCm <= 0) return;
+  const valueM = valueCm / 100;
+
+  if (sizeLocked) {
+    // Uniform scale — tüm eksenler birlikte ölçeklenir
+    const origDim = which === 'w' ? modelOrigSizeM.x
+                  : which === 'h' ? modelOrigSizeM.y
+                  : modelOrigSizeM.z;
+    if (!origDim) return;
+    const newScale = valueM / origDim;
+    model.scale.setScalar(newScale);
+    // Scale slider güncelle (aralık dışına çıkarsa kırp)
+    const clamped = Math.min(5, Math.max(0.01, newScale));
+    document.getElementById('model-scale').value = clamped;
+    document.getElementById('val-scale').textContent = newScale.toFixed(3);
+    // Diğer boyutları güncelle
+    updateSizeCmUI();
+  } else {
+    // Non-uniform scale — sadece seçili eksen
+    if (which === 'w') model.scale.x = valueM / modelOrigSizeM.x;
+    else if (which === 'h') model.scale.y = valueM / modelOrigSizeM.y;
+    else if (which === 'd') model.scale.z = valueM / modelOrigSizeM.z;
+  }
+};
+
+window.toggleSizeLock = function() {
+  sizeLocked = !sizeLocked;
+  const btn = document.getElementById('size-lock-btn');
+  if (sizeLocked) {
+    btn.classList.add('locked');
+    btn.textContent = '🔒 Kilitli';
+  } else {
+    btn.classList.remove('locked');
+    btn.textContent = '🔓 Serbest';
+  }
+};
+
+// ──────────────────────────────────────────────
+// EXPORT — GLB & USDZ
+// ──────────────────────────────────────────────
+window.exportGLB = function() {
+  if (!model) return;
+  showToast('GLB oluşturuluyor...', 'warn');
+  glbExporter.parse(
+    model,
+    (result) => {
+      const blob = new Blob([result], { type: 'application/octet-stream' });
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = (currentFileName.replace(/\.[^.]+$/, '') || 'model') + '-edited.glb';
+      a.click();
+      URL.revokeObjectURL(url);
+      showToast('GLB indirildi!', 'success');
+    },
+    (err) => { showToast('GLB hatası: ' + err.message); console.error(err); },
+    { binary: true }
+  );
+};
+
+window.exportUSDZ = async function() {
+  if (!model) return;
+  showToast('USDZ oluşturuluyor...', 'warn');
+  try {
+    const result = await usdzExporter.parseAsync(model);
+    const blob = new Blob([result], { type: 'model/vnd.usdz+zip' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = (currentFileName.replace(/\.[^.]+$/, '') || 'model') + '.usdz';
+    a.click();
+    URL.revokeObjectURL(url);
+    showToast('USDZ indirildi!', 'success');
+  } catch (err) {
+    showToast('USDZ hatası: ' + err.message);
+    console.error(err);
+  }
+};
+
+document.getElementById('btn-export-glb').addEventListener('click', exportGLB);
+document.getElementById('btn-export-usdz').addEventListener('click', exportUSDZ);
 
 // ──────────────────────────────────────────────
 // KEYBOARD SHORTCUTS
