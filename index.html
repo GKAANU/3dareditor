@@ -1273,8 +1273,11 @@
             </div>
             <!-- Boyut (cm) — model yüklenince görünür -->
             <div class="control" id="dims-wrap" style="display:none;">
-              <div class="control-row" style="margin-bottom:6px;">
-                <span class="control-label">Boyut (cm)</span>
+              <div class="control-row" style="margin-bottom:4px;">
+                <span class="control-label">
+                  Boyut (cm)
+                  <span style="display:block;font-size:10px;color:var(--text-muted);font-weight:400;margin-top:1px;">export &amp; AR boyutu</span>
+                </span>
                 <button class="size-lock-btn locked" id="size-lock-btn" onclick="toggleSizeLock()" title="En-boy oranını kilitle / serbest bırak">🔒 Kilitli</button>
               </div>
               <div class="dim-row">
@@ -1487,9 +1490,11 @@ let model         = null;
 let meshes        = [];
 let activeMesh    = null;
 let origMaterials = new Map(); // mesh uuid -> original mat clone
-let modelOrigSizeM = null;     // GLB orijinal boyutu (metre) — ölçeklemeden önce
-let currentFileName = '';      // Yüklü dosya adı
-let sizeLocked  = true;        // Boyut girişleri: oran kilitli mi?
+let modelOrigSizeM   = null;   // GLB orijinal boyutu (metre) — yükleme ölçeğinden önce
+let autoScaleValue   = 1.0;   // Viewport'a sığdırma için hesaplanan auto-fit ölçeği
+let exportScaleFactor = 1.0;  // Kullanıcının belirlediği gerçek dünya ölçeği (AR/export için)
+let currentFileName  = '';    // Yüklü dosya adı
+let sizeLocked       = true;  // Boyut girişleri: oran kilitli mi?
 const usdzExporter = new USDZExporter();
 const glbExporter  = new GLTFExporter();
 
@@ -1559,17 +1564,19 @@ function loadGLB(url, filename) {
     const maxDim = Math.max(size.x, size.y, size.z);
     const scale = 1.5 / maxDim;
 
-    // Orijinal boyutu kaydet (scale uygulanmadan önce — 1 birim = 1 metre)
-    modelOrigSizeM = { x: size.x, y: size.y, z: size.z };
-    currentFileName = filename || '';
+    // Orijinal GLB boyutunu kaydet (1 Three.js birimi = 1 metre = 100 cm)
+    modelOrigSizeM    = { x: size.x, y: size.y, z: size.z };
+    currentFileName   = filename || '';
+    autoScaleValue    = scale;   // sadece viewport fit için — export'a GITMEZ
+    exportScaleFactor = 1.0;     // başlangıç: orijinal GLB boyutu (değiştirilmemiş)
 
-    model.scale.setScalar(scale);
+    model.scale.setScalar(autoScaleValue); // sadece görüntü için
     model.position.sub(center.multiplyScalar(scale));
     model.position.y += size.y * scale * 0.5;
 
-    // Scale slider'ı gerçek değerle güncelle
-    document.getElementById('model-scale').value = Math.min(5, Math.max(0.01, scale));
-    document.getElementById('val-scale').textContent = scale.toFixed(3);
+    // Scale slider = exportScaleFactor (1.0 = orijinal GLB boyutu)
+    document.getElementById('model-scale').value = 1.0;
+    document.getElementById('val-scale').textContent = '1.000';
 
     gridHelper.position.y = -(size.y * scale * 0.5) + model.position.y - size.y * scale * 0.5;
     shadowPlane.position.y = gridHelper.position.y + 0.001;
@@ -1862,7 +1869,8 @@ window.toggleShadow = function(v) { shadowPlane.visible = v; };
 
 window.updateModelScale = function(v) {
   if (!model) return;
-  model.scale.setScalar(v);
+  exportScaleFactor = v; // slider = export scale (1.0 = orijinal GLB boyutu)
+  model.scale.setScalar(autoScaleValue * exportScaleFactor);
   document.getElementById('val-scale').textContent = v.toFixed(3);
   updateSizeCmUI();
 };
@@ -1959,14 +1967,16 @@ document.getElementById('btn-reset-all').addEventListener('click', () => {
   });
   if (activeMesh) selectMesh(activeMesh.uuid);
   setEnvironment('studio');
-  document.getElementById('model-scale').value = 1;
+  exportScaleFactor = 1.0;
+  document.getElementById('model-scale').value = 1.0;
   document.getElementById('model-posy').value = 0;
   if (model) {
-    model.scale.setScalar(1);
+    model.scale.setScalar(autoScaleValue); // auto-fit ölçeğine dön
     model.position.y = 0;
   }
-  document.getElementById('val-scale').textContent = '1.00';
+  document.getElementById('val-scale').textContent = '1.000';
   document.getElementById('val-posy').textContent = '0.00';
+  updateSizeCmUI();
 });
 
 // ──────────────────────────────────────────────
@@ -2179,36 +2189,42 @@ canvasWrap.addEventListener('drop', (e) => {
 // BOYUT (CM) — MODEL SIZE EDITING
 // ──────────────────────────────────────────────
 function updateSizeCmUI() {
-  if (!model || !modelOrigSizeM) return;
-  const sx = model.scale.x, sy = model.scale.y, sz = model.scale.z;
-  document.getElementById('dim-w').value = (modelOrigSizeM.x * sx * 100).toFixed(1);
-  document.getElementById('dim-h').value = (modelOrigSizeM.y * sy * 100).toFixed(1);
-  document.getElementById('dim-d').value = (modelOrigSizeM.z * sz * 100).toFixed(1);
+  if (!modelOrigSizeM) return;
+  // Gerçek dünya boyutu = orijinal GLB boyutu × exportScaleFactor
+  // (autoScaleValue dahil değil — o sadece viewport içindir)
+  document.getElementById('dim-w').value = (modelOrigSizeM.x * exportScaleFactor * 100).toFixed(1);
+  document.getElementById('dim-h').value = (modelOrigSizeM.y * exportScaleFactor * 100).toFixed(1);
+  document.getElementById('dim-d').value = (modelOrigSizeM.z * exportScaleFactor * 100).toFixed(1);
 }
 
 window.applyDimCm = function(which, valueCm) {
   if (!model || !modelOrigSizeM || !valueCm || valueCm <= 0) return;
-  const valueM = valueCm / 100;
+
+  // Hangi eksenin orijinal cm boyutu?
+  const origCm = which === 'w' ? modelOrigSizeM.x * 100
+               : which === 'h' ? modelOrigSizeM.y * 100
+               : modelOrigSizeM.z * 100;
+  if (!origCm) return;
+
+  // Export scale factor = hedef / orijinal
+  const newFactor = valueCm / origCm;
 
   if (sizeLocked) {
-    // Uniform scale — tüm eksenler birlikte ölçeklenir
-    const origDim = which === 'w' ? modelOrigSizeM.x
-                  : which === 'h' ? modelOrigSizeM.y
-                  : modelOrigSizeM.z;
-    if (!origDim) return;
-    const newScale = valueM / origDim;
-    model.scale.setScalar(newScale);
-    // Scale slider güncelle (aralık dışına çıkarsa kırp)
-    const clamped = Math.min(5, Math.max(0.01, newScale));
-    document.getElementById('model-scale').value = clamped;
-    document.getElementById('val-scale').textContent = newScale.toFixed(3);
-    // Diğer boyutları güncelle
+    // Uniform: tüm eksenler birlikte
+    exportScaleFactor = newFactor;
+    // Viewport: autoFit × exportFactor (model doğru oranda görünsün)
+    model.scale.setScalar(autoScaleValue * exportScaleFactor);
+    // Scale slider'ı exportScaleFactor ile güncelle
+    document.getElementById('model-scale').value = Math.min(5, Math.max(0.01, exportScaleFactor));
+    document.getElementById('val-scale').textContent = exportScaleFactor.toFixed(3);
+    // Diğer iki boyutu da güncelle
     updateSizeCmUI();
   } else {
-    // Non-uniform scale — sadece seçili eksen
-    if (which === 'w') model.scale.x = valueM / modelOrigSizeM.x;
-    else if (which === 'h') model.scale.y = valueM / modelOrigSizeM.y;
-    else if (which === 'd') model.scale.z = valueM / modelOrigSizeM.z;
+    // Non-uniform: sadece seçili eksen
+    exportScaleFactor = newFactor; // referans için sakla
+    if (which === 'w') model.scale.x = autoScaleValue * (valueCm / 100 / modelOrigSizeM.x);
+    else if (which === 'h') model.scale.y = autoScaleValue * (valueCm / 100 / modelOrigSizeM.y);
+    else if (which === 'd') model.scale.z = autoScaleValue * (valueCm / 100 / modelOrigSizeM.z);
   }
 };
 
@@ -2230,9 +2246,15 @@ window.toggleSizeLock = function() {
 window.exportGLB = function() {
   if (!model) return;
   showToast('GLB oluşturuluyor...', 'warn');
+
+  // Export anında model.scale = exportScaleFactor (autoFit olmadan — AR/glTF doğru boyut)
+  const displayScale = model.scale.x;
+  model.scale.setScalar(exportScaleFactor);
+
   glbExporter.parse(
     model,
     (result) => {
+      model.scale.setScalar(displayScale); // viewport ölçeğini geri al
       const blob = new Blob([result], { type: 'application/octet-stream' });
       const url  = URL.createObjectURL(blob);
       const a    = document.createElement('a');
@@ -2242,7 +2264,11 @@ window.exportGLB = function() {
       URL.revokeObjectURL(url);
       showToast('GLB indirildi!', 'success');
     },
-    (err) => { showToast('GLB hatası: ' + err.message); console.error(err); },
+    (err) => {
+      model.scale.setScalar(displayScale); // hata durumunda da geri al
+      showToast('GLB hatası: ' + err.message);
+      console.error(err);
+    },
     { binary: true }
   );
 };
@@ -2250,8 +2276,18 @@ window.exportGLB = function() {
 window.exportUSDZ = async function() {
   if (!model) return;
   showToast('USDZ oluşturuluyor...', 'warn');
+
+  // Export anında model.scale = exportScaleFactor (autoFit olmadan)
+  const displayScale = model.scale.x;
+  model.scale.setScalar(exportScaleFactor);
+
   try {
-    const result = await usdzExporter.parseAsync(model);
+    // parseAsync (r153+) varsa kullan, yoksa parse() fallback
+    const result = typeof usdzExporter.parseAsync === 'function'
+      ? await usdzExporter.parseAsync(model)
+      : usdzExporter.parse(model);
+
+    model.scale.setScalar(displayScale);
     const blob = new Blob([result], { type: 'model/vnd.usdz+zip' });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
@@ -2261,6 +2297,7 @@ window.exportUSDZ = async function() {
     URL.revokeObjectURL(url);
     showToast('USDZ indirildi!', 'success');
   } catch (err) {
+    model.scale.setScalar(displayScale);
     showToast('USDZ hatası: ' + err.message);
     console.error(err);
   }
