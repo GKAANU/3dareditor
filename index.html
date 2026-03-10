@@ -2672,7 +2672,18 @@ function showUsdzModal(title, bodyHTML) {
 // ── USDZ NATIVE PARSER — three-usdz-loader (CDN) ────────────────────────────
 // USD binary (USDC) dosyalarını WebAssembly ile açar.
 // Pixar USD → Emscripten → WASM pipeline'ı kullanır.
-const USDZ_LOADER_CDN = 'https://cdn.jsdelivr.net/npm/three-usdz-loader@1.0.6/';
+//
+// Doğru dosya yapısı (paket v1.0.6 incelendi):
+//   lib/USDZLoader.js               — CJS entry, API sınıfı
+//   external/emHdBindings.js        — Emscripten Pixar USD loader
+//   external/emHdBindings.wasm      — WASM binary (7.8 MB)
+//   external/emHdBindings.data      — WASM data (614 KB)
+//   external/emHdBindings.worker.js — Web Worker
+//
+// esm.sh ?external=three → Three.js importmap'ten gelir (dual-instance sorunu yok)
+const USDZ_ESM_URL = 'https://esm.sh/three-usdz-loader@1.0.6?external=three';
+const USDZ_EXT_DIR = 'https://cdn.jsdelivr.net/npm/three-usdz-loader@1.0.6/external/';
+
 let _usdzLoaderMod  = null;   // cached CDN module
 let _usdzLoaderFail = false;  // CDN yüklenemezse tekrar deneme
 
@@ -2684,41 +2695,39 @@ async function loadUsdzNative(arrayBuffer, filename) {
     if (location.protocol === 'file:') {
       throw new Error('FILE_PROTOCOL');   // file:// → service worker çalışmaz
     }
-    // HTTP(S) ama henüz coi-serviceworker aktif olmamış → sayfa yeniden yükleniyor
-    throw new Error('NOT_ISOLATED');
+    throw new Error('NOT_ISOLATED');      // server.py ile aç
   }
 
   if (!_usdzLoaderMod) {
-    showToast('USDZ parser yükleniyor…', 'warn');
+    showToast('USDZ parser yükleniyor… (~9 MB)', 'warn');
     try {
-      _usdzLoaderMod = await import(USDZ_LOADER_CDN + 'dist/index.es.js');
+      // esm.sh → CJS lib/USDZLoader.js'i gerçek ES modüle çevirir;
+      // ?external=three → Three.js'i importmap'ten alır, paket kendi kopyasını getirmez
+      _usdzLoaderMod = await import(USDZ_ESM_URL);
     } catch (e) {
       _usdzLoaderFail = true;
       throw new Error('CDN_IMPORT_FAIL: ' + e.message);
     }
   }
 
-  // API: USDZInstance (v1.x) veya USDZLoader veya default export
-  const USDZCls = _usdzLoaderMod.USDZInstance
-                || _usdzLoaderMod.USDZLoader
-                || _usdzLoaderMod.default;
-
-  if (!USDZCls || typeof USDZCls !== 'function') {
+  // esm.sh CJS modülden { USDZLoader } named export üretir
+  const USDZLoader = _usdzLoaderMod.USDZLoader || _usdzLoaderMod.default?.USDZLoader;
+  if (!USDZLoader || typeof USDZLoader !== 'function') {
     _usdzLoaderFail = true;
-    throw new Error('USDZInstance sınıfı CDN modulünde bulunamadı');
+    throw new Error('USDZLoader bulunamadı (exports: ' + Object.keys(_usdzLoaderMod).join(',') + ')');
   }
 
-  const container = new THREE.Group();
-  const instance  = new USDZCls(container, renderer, {
-    wasmPath: USDZ_LOADER_CDN + 'build/'
-  });
+  // Doğru API: new USDZLoader(externalDir) → initialize() → waitForModuleReady() → loadFile()
+  const usdzLoader = new USDZLoader(USDZ_EXT_DIR);
+  await usdzLoader.initialize(USDZ_EXT_DIR);
+  await usdzLoader.waitForModuleReady();
 
-  // three-usdz-loader bir File nesnesi bekler
+  const container = new THREE.Group();
   const file = new File([arrayBuffer], filename || 'model.usdz', {
     type: 'model/vnd.usdz+zip'
   });
 
-  await instance.setFile(file);
+  await usdzLoader.loadFile(file, container);
   return container;
 }
 
