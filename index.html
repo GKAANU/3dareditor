@@ -4,6 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>3D AR Material Editor</title>
+  <!--
+    coi-serviceworker: COOP/COEP başlıklarını service worker aracılığıyla enjekte eder.
+    → crossOriginIsolated = true yaparak SharedArrayBuffer'ı etkinleştirir.
+    → USDZ WebAssembly parser (three-usdz-loader / Pixar USD WASM) için gerekli.
+    → Yalnızca HTTPS veya localhost'ta çalışır; file:// protokolünde sessizce devre dışı kalır.
+    → İlk açılışta bir kez sayfa yeniden yüklenir, ardından kalıcı olarak aktif olur.
+  -->
+  <script src="https://cdn.jsdelivr.net/npm/coi-serviceworker@0.1.7/coi-serviceworker.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -2675,13 +2683,22 @@ let _usdzLoaderFail = false;  // CDN yüklenemezse tekrar deneme
 async function loadUsdzNative(arrayBuffer, filename) {
   if (_usdzLoaderFail) throw new Error('USDZ parser önceden yüklenemedi');
 
+  // ── SharedArrayBuffer kontrolü (Emscripten WASM threading için zorunlu) ──
+  if (!self.crossOriginIsolated) {
+    if (location.protocol === 'file:') {
+      throw new Error('FILE_PROTOCOL');   // file:// → service worker çalışmaz
+    }
+    // HTTP(S) ama henüz coi-serviceworker aktif olmamış → sayfa yeniden yükleniyor
+    throw new Error('NOT_ISOLATED');
+  }
+
   if (!_usdzLoaderMod) {
     showToast('USDZ parser yükleniyor…', 'warn');
     try {
       _usdzLoaderMod = await import(USDZ_LOADER_CDN + 'dist/index.es.js');
     } catch (e) {
       _usdzLoaderFail = true;
-      throw new Error('three-usdz-loader CDN hatası: ' + e.message);
+      throw new Error('CDN_IMPORT_FAIL: ' + e.message);
     }
   }
 
@@ -2732,6 +2749,7 @@ async function loadUSDZ(arrayBuffer, filename) {
     const usdcEntry = entries.find(n => /\.usdc$/i.test(n));
     const usdaEntry = entries.find(n => /\.usda$/i.test(n));
 
+    let _nativeErrCode = null;
     if (usdcEntry || usdaEntry) {
       // ── İlk tercih: three-usdz-loader (WebAssembly native parser) ────────
       try {
@@ -2740,7 +2758,8 @@ async function loadUSDZ(arrayBuffer, filename) {
         showToast('USDZ başarıyla yüklendi! ✅', 'success');
         return;
       } catch (nativeErr) {
-        console.warn('[USDZ Native] Yüklenemedi, modal gösteriliyor:', nativeErr.message);
+        _nativeErrCode = nativeErr.message;
+        console.warn('[USDZ Native] Yüklenemedi:', _nativeErrCode);
         // CDN / WASM başarısız → mevcut yardımcı modal'a düş
       }
     }
@@ -2756,20 +2775,49 @@ async function loadUSDZ(arrayBuffer, filename) {
 
     if (usdcEntry || usdaEntry) {
       const geoFile = usdcEntry || usdaEntry;
+
+      // Hata koduna göre ipucu oluştur
+      let wasmHint = '';
+      if (_nativeErrCode === 'FILE_PROTOCOL') {
+        wasmHint = `
+        <div style="margin-top:10px;padding:10px 12px;background:rgba(255,190,0,0.08);
+                    border:1px solid rgba(255,190,0,0.25);border-radius:8px;font-size:12px;">
+          💡 <strong>USDZ parser'ı etkinleştirmek için:</strong><br>
+          Editörü doğrudan <code>file://</code> ile değil, yerel bir sunucu üzerinden açın:<br>
+          <code style="user-select:all;display:block;margin-top:4px;">
+            python3 -m http.server 8080
+          </code>
+          Sonra: <code>http://localhost:8080/index.html</code>
+        </div>`;
+      } else if (_nativeErrCode === 'NOT_ISOLATED') {
+        wasmHint = `
+        <div style="margin-top:10px;padding:10px 12px;background:rgba(120,200,120,0.08);
+                    border:1px solid rgba(120,200,120,0.25);border-radius:8px;font-size:12px;">
+          🔄 USDZ parser aktif ediliyor — sayfayı yenileyin ve USDZ'yi tekrar sürükleyin.
+        </div>`;
+      } else if (_nativeErrCode) {
+        wasmHint = `
+        <div style="margin-top:10px;padding:8px 10px;background:rgba(255,100,100,0.06);
+                    border-radius:6px;font-size:11px;color:var(--text-muted);">
+          ⓘ Parser hatası: ${_nativeErrCode}
+        </div>`;
+      }
+
       showUsdzModal('⚠ Standart USDZ — Açılamıyor', `
         <p>Bu dosya <strong>standart Apple/Tripo3D USDZ</strong> formatında.</p>
         <p style="margin-top:10px;">📐 Geometri: <code>${geoFile}</code>
-          <span style="font-size:11px;">(USD binary — WebAssembly parser da yüklenemedi)</span></p>
+          <span style="font-size:11px;">(USD binary — WebAssembly parser gerekli)</span></p>
         <p style="margin-top:4px;">🖼 Dosyalar:<br>• <code>${allNames || '—'}</code></p>
+        ${wasmHint}
         <hr style="border:none;border-top:1px solid var(--border);margin:14px 0;">
-        <p><strong>✅ Çözüm — Tripo3D'den GLB indirin:</strong></p>
+        <p><strong>✅ Hızlı çözüm — Tripo3D'den GLB indirin:</strong></p>
         <p style="margin-top:6px;">
           Tripo3D → Modelinizi seçin → <em>İndir</em> → Format: <em>GLB</em>
         </p>
         <p style="margin-top:10px;">GLB'yi bu editörde düzenleyip,
           bitince <em>USDZ olarak export</em> alabilirsiniz.</p>
         <p style="margin-top:12px;font-size:11px;color:var(--text-muted);">
-          ⓘ USDZ = iOS AR görüntüleme formatı. Düzenlemek için GLB gerekir.</p>
+          ⓘ USDZ = iOS AR görüntüleme formatı. Düzenleme için GLB önerilir.</p>
       `);
     } else {
       showUsdzModal('⚠ USDZ Açılamadı', `
