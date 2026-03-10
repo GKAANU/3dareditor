@@ -2665,6 +2665,50 @@ function showUsdzModal(title, bodyHTML) {
   document.getElementById('usdz-modal-overlay').classList.add('show');
 }
 
+// ── USDZ NATIVE PARSER — three-usdz-loader (CDN) ────────────────────────────
+// USD binary (USDC) dosyalarını WebAssembly ile açar.
+// Pixar USD → Emscripten → WASM pipeline'ı kullanır.
+const USDZ_LOADER_CDN = 'https://cdn.jsdelivr.net/npm/three-usdz-loader@1.0.6/';
+let _usdzLoaderMod  = null;   // cached CDN module
+let _usdzLoaderFail = false;  // CDN yüklenemezse tekrar deneme
+
+async function loadUsdzNative(arrayBuffer, filename) {
+  if (_usdzLoaderFail) throw new Error('USDZ parser önceden yüklenemedi');
+
+  if (!_usdzLoaderMod) {
+    showToast('USDZ parser yükleniyor…', 'warn');
+    try {
+      _usdzLoaderMod = await import(USDZ_LOADER_CDN + 'dist/index.es.js');
+    } catch (e) {
+      _usdzLoaderFail = true;
+      throw new Error('three-usdz-loader CDN hatası: ' + e.message);
+    }
+  }
+
+  // API: USDZInstance (v1.x) veya USDZLoader veya default export
+  const USDZCls = _usdzLoaderMod.USDZInstance
+                || _usdzLoaderMod.USDZLoader
+                || _usdzLoaderMod.default;
+
+  if (!USDZCls || typeof USDZCls !== 'function') {
+    _usdzLoaderFail = true;
+    throw new Error('USDZInstance sınıfı CDN modulünde bulunamadı');
+  }
+
+  const container = new THREE.Group();
+  const instance  = new USDZCls(container, renderer, {
+    wasmPath: USDZ_LOADER_CDN + 'build/'
+  });
+
+  // three-usdz-loader bir File nesnesi bekler
+  const file = new File([arrayBuffer], filename || 'model.usdz', {
+    type: 'model/vnd.usdz+zip'
+  });
+
+  await instance.setFile(file);
+  return container;
+}
+
 // ── USDZ LOADING (ZIP içindeki GLB'yi bul ve yükle) ─────────────────────────
 async function loadUSDZ(arrayBuffer, filename) {
   showSpinner(true);
@@ -2684,12 +2728,25 @@ async function loadUSDZ(arrayBuffer, filename) {
       return;
     }
 
-    showSpinner(false);
-    console.warn('[USDZ Load] ZIP içeriği:', entries);
-
     // .usdc (binary USD) veya .usda (ASCII USD) var mı?
     const usdcEntry = entries.find(n => /\.usdc$/i.test(n));
     const usdaEntry = entries.find(n => /\.usda$/i.test(n));
+
+    if (usdcEntry || usdaEntry) {
+      // ── İlk tercih: three-usdz-loader (WebAssembly native parser) ────────
+      try {
+        const container = await loadUsdzNative(arrayBuffer, filename);
+        _onGltfLoaded({ scene: container }, filename);
+        showToast('USDZ başarıyla yüklendi! ✅', 'success');
+        return;
+      } catch (nativeErr) {
+        console.warn('[USDZ Native] Yüklenemedi, modal gösteriliyor:', nativeErr.message);
+        // CDN / WASM başarısız → mevcut yardımcı modal'a düş
+      }
+    }
+
+    showSpinner(false);
+    console.warn('[USDZ Load] ZIP içeriği:', entries);
 
     // Dosya isimlerini temiz listele (dizin girdilerini, boş ve sadece rakam olanları filtrele)
     const allNames = entries
@@ -2702,7 +2759,7 @@ async function loadUSDZ(arrayBuffer, filename) {
       showUsdzModal('⚠ Standart USDZ — Açılamıyor', `
         <p>Bu dosya <strong>standart Apple/Tripo3D USDZ</strong> formatında.</p>
         <p style="margin-top:10px;">📐 Geometri: <code>${geoFile}</code>
-          <span style="font-size:11px;">(USD binary — Three.js okuyamıyor)</span></p>
+          <span style="font-size:11px;">(USD binary — WebAssembly parser da yüklenemedi)</span></p>
         <p style="margin-top:4px;">🖼 Dosyalar:<br>• <code>${allNames || '—'}</code></p>
         <hr style="border:none;border-top:1px solid var(--border);margin:14px 0;">
         <p><strong>✅ Çözüm — Tripo3D'den GLB indirin:</strong></p>
