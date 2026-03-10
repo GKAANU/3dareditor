@@ -1405,25 +1405,44 @@
             <span class="section-chevron">▼</span>
           </div>
           <div class="section-body">
+
+            <!-- Texture boyutu -->
             <div class="control">
               <div class="control-label" style="margin-bottom:5px;">
-                USDZ Texture Boyutu
-                <span style="display:block;font-size:10px;color:var(--text-muted);font-weight:400;margin-top:1px;">boyutu küçültür, kaliteyi düşürür</span>
+                🖼 Texture Boyutu
+                <span style="display:block;font-size:10px;color:var(--text-muted);font-weight:400;margin-top:1px;">küçüldükçe dosya küçür, kalite düşer</span>
               </div>
-              <select class="select-control" id="usdz-tex-size" onchange="usdzMaxTexSize = this.value === 'Infinity' ? Infinity : +this.value">
+              <select class="select-control" id="usdz-tex-size" onchange="setUsdzTexSize(this.value)">
                 <option value="Infinity">Sınırsız — Orijinal kalite</option>
                 <option value="2048">2048 px — Yüksek</option>
-                <option value="1024" selected>1024 px — Önerilen ↓boyut</option>
+                <option value="1024" selected>1024 px — Önerilen</option>
                 <option value="512">512 px — Küçük dosya</option>
                 <option value="256">256 px — Minimum</option>
               </select>
             </div>
-            <div style="font-size:11px;color:var(--text-muted);line-height:1.55;background:var(--surface2);border-radius:6px;padding:8px 10px;">
+
+            <!-- Geometry simplification -->
+            <div class="control" style="margin-top:10px;">
+              <div class="control-label" style="margin-bottom:5px;">
+                📐 Geometry Simplification
+                <span style="display:block;font-size:10px;color:var(--text-muted);font-weight:400;margin-top:1px;">polygon azaltır — en büyük etkisi bu ⭐</span>
+              </div>
+              <select class="select-control" id="simplify-ratio" onchange="setExportSimplifyRatio(this.value)">
+                <option value="0"    selected>Hayır — Orijinal kalite</option>
+                <option value="0.25">%25 azalt — Az fark, ~%20 küçük</option>
+                <option value="0.5" >%50 azalt — Önerilen, ~%40 küçük</option>
+                <option value="0.75">%75 azalt — Agresif, ~%60 küçük</option>
+              </select>
+            </div>
+
+            <!-- Açıklama kutusu -->
+            <div style="font-size:11px;color:var(--text-muted);line-height:1.6;background:var(--surface2);border-radius:6px;padding:8px 10px;margin-top:10px;">
               ⓘ <strong style="color:var(--text);">GLB → USDZ neden büyür?</strong><br>
-              GLB: Draco geometri + JPG texture<br>
-              USDZ: Ham geometri + PNG texture<br>
-              47 MB GLB → 130 MB USDZ normaldir.<br>
-              <strong style="color:var(--accent2);">1024px seçeneği boyutu ~4-8× küçültür.</strong>
+              • GLB: <em style="color:var(--accent2);">Draco</em> geometri + <em style="color:var(--accent2);">JPG</em> texture<br>
+              • USDZ: <em style="color:var(--danger);">Ham</em> geometri + <em style="color:var(--danger);">PNG</em> texture<br><br>
+              <strong style="color:var(--text);">47 MB GLB → 130 MB USDZ</strong> normaldir.<br>
+              En büyük etki: Geometry (%50) + Texture (1024px)<br>
+              <strong style="color:var(--success);">→ ~50-60 MB'a indirilebilir</strong>
             </div>
           </div>
         </div>
@@ -1485,7 +1504,8 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RGBELoader }    from 'three/addons/loaders/RGBELoader.js';
 import { USDZExporter }  from 'three/addons/exporters/USDZExporter.js';
 import { GLTFExporter }  from 'three/addons/exporters/GLTFExporter.js';
-import * as fflate       from 'three/addons/libs/fflate.module.js';
+import * as fflate           from 'three/addons/libs/fflate.module.js';
+import { SimplifyModifier }  from 'three/addons/modifiers/SimplifyModifier.js';
 // RoomEnvironment kaldırıldı — studio env kendi kendine oluşturuluyor
 
 // ──────────────────────────────────────────────
@@ -1602,9 +1622,16 @@ let autoScaleValue   = 1.0;   // Viewport'a sığdırma için hesaplanan auto-fi
 let exportScaleFactor = 1.0;  // Kullanıcının belirlediği gerçek dünya ölçeği (AR/export için)
 let currentFileName  = '';    // Yüklü dosya adı
 let sizeLocked       = true;  // Boyut girişleri: oran kilitli mi?
-let usdzMaxTexSize   = 1024;  // USDZ export texture boyut sınırı (px)
-const usdzExporter = new USDZExporter();
-const glbExporter  = new GLTFExporter();
+let usdzMaxTexSize      = 1024; // USDZ export texture boyut sınırı (px)
+let exportSimplifyRatio = 0.0;  // 0 = yok, 0.5 = %50 polygon azalt
+const usdzExporter   = new USDZExporter();
+const glbExporter    = new GLTFExporter();
+const _simplifyMod   = new SimplifyModifier();
+
+// ── Module-scoped değişkenlere inline event handler'lardan erişim için setterlar ──
+// (type=module strict scope — let değişkenler window'dan erişilemez)
+window.setUsdzTexSize         = v  => { usdzMaxTexSize      = (v === 'Infinity') ? Infinity : +v; };
+window.setExportSimplifyRatio = v  => { exportSimplifyRatio = +v; };
 
 // ──────────────────────────────────────────────
 // RESIZE
@@ -2367,16 +2394,21 @@ window.toggleSizeLock = function() {
 // ──────────────────────────────────────────────
 window.exportGLB = function() {
   if (!model) return;
-  showToast('GLB oluşturuluyor...', 'warn');
+  const simplifyActive = exportSimplifyRatio > 0;
+  showToast(simplifyActive ? 'GLB oluşturuluyor (simplify)...' : 'GLB oluşturuluyor...', 'warn');
 
   // Export anında model.scale = exportScaleFactor (autoFit olmadan — AR/glTF doğru boyut)
   const displayScale = model.scale.x;
   model.scale.setScalar(exportScaleFactor);
 
+  // Geometry simplification (seçilmişse)
+  const savedGeos = simplifyMeshesForExport(model, exportSimplifyRatio);
+
   glbExporter.parse(
     model,
     (result) => {
-      model.scale.setScalar(displayScale); // viewport ölçeğini geri al
+      restoreGeometries(savedGeos);
+      model.scale.setScalar(displayScale);
       const blob = new Blob([result], { type: 'application/octet-stream' });
       const url  = URL.createObjectURL(blob);
       const a    = document.createElement('a');
@@ -2384,10 +2416,12 @@ window.exportGLB = function() {
       a.download = (currentFileName.replace(/\.[^.]+$/, '') || 'model') + '-edited.glb';
       a.click();
       URL.revokeObjectURL(url);
-      showToast('GLB indirildi!', 'success');
+      const mb = (result.byteLength / 1048576).toFixed(1);
+      showToast(`GLB indirildi! ${mb} MB`, 'success');
     },
     (err) => {
-      model.scale.setScalar(displayScale); // hata durumunda da geri al
+      restoreGeometries(savedGeos);
+      model.scale.setScalar(displayScale);
       showToast('GLB hatası: ' + err.message);
       console.error(err);
     },
@@ -2439,14 +2473,55 @@ function restoreTextures(saved) {
   });
 }
 
+// ── Geometry simplification (export öncesi polygon azaltma) ─────────────────
+function simplifyMeshesForExport(obj, removeRatio) {
+  const saved = new Map();
+  if (!removeRatio || removeRatio <= 0) return saved;
+
+  obj.traverse(child => {
+    if (!child.isMesh) return;
+    try {
+      const geo = child.geometry;
+      // SimplifyModifier indexed BufferGeometry gerektirir
+      if (!geo || !geo.index) {
+        console.warn('[Simplify] Index yok, atlandı:', child.name || child.uuid);
+        return;
+      }
+      const origCount  = geo.attributes.position.count;
+      const targetCount = Math.max(6, Math.floor(origCount * (1.0 - removeRatio)));
+      const simplified  = _simplifyMod.modify(geo, targetCount);
+      saved.set(child.uuid, geo);
+      child.geometry = simplified;
+    } catch (e) {
+      console.warn('[Simplify] Mesh atlandı:', child.name || child.uuid, e.message);
+    }
+  });
+  return saved;
+}
+
+function restoreGeometries(savedGeos) {
+  if (!model || !savedGeos?.size) return;
+  model.traverse(child => {
+    if (!child.isMesh) return;
+    const orig = savedGeos.get(child.uuid);
+    if (orig) child.geometry = orig;
+  });
+}
+
 window.exportUSDZ = async function() {
   if (!model) return;
-  showToast('USDZ oluşturuluyor...', 'warn');
+  const simplifyActive = exportSimplifyRatio > 0;
+  showToast(simplifyActive
+    ? `USDZ oluşturuluyor (simplify %${Math.round(exportSimplifyRatio * 100)})... bekleyin`
+    : 'USDZ oluşturuluyor...', 'warn');
 
   const displayScale = model.scale.x;
   model.scale.setScalar(exportScaleFactor);
 
-  // Texture'ları seçilen boyuta küçült — PNG boyutunu azaltır
+  // 1) Geometry simplification (seçilmişse) — en büyük boyut etkisi
+  const savedGeos = simplifyMeshesForExport(model, exportSimplifyRatio);
+
+  // 2) Texture resize — PNG boyutunu azaltır
   const savedTex = resizeTexturesForExport(model, usdzMaxTexSize);
 
   try {
@@ -2463,6 +2538,7 @@ window.exportUSDZ = async function() {
     }
 
     restoreTextures(savedTex);
+    restoreGeometries(savedGeos);
     model.scale.setScalar(displayScale);
 
     if (!result || result.byteLength === 0) {
@@ -2480,6 +2556,7 @@ window.exportUSDZ = async function() {
     showToast(`USDZ indirildi! ${mb} MB`, 'success');
   } catch (err) {
     restoreTextures(savedTex);
+    restoreGeometries(savedGeos);
     model.scale.setScalar(displayScale);
     showToast('USDZ hatası: ' + err.message);
     console.error('[USDZ Export]', err);
