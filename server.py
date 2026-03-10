@@ -22,7 +22,8 @@ class COIHandler(SimpleHTTPRequestHandler):
 
     def log_message(self, fmt, *args):
         # Yalnızca HTML/JS/WASM isteklerini logla (favicon, ico vb. gizle)
-        path = args[0] if args else ''
+        # args[0] bazen HTTPStatus enum gelebilir — str()'ye çevirerek güvenli kontrol yap
+        path = str(args[0]) if args else ''
         if any(ext in path for ext in ['.html', '.js', '.wasm', '.usdz', '.glb']):
             super().log_message(fmt, *args)
 
