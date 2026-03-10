@@ -836,6 +836,7 @@
         <div class="file-types">
           <span class="badge">GLB</span>
           <span class="badge">GLTF</span>
+          <span class="badge">USDZ</span>
         </div>
         <button class="btn btn-primary" style="margin-top:8px;" onclick="document.getElementById('file-input').click()">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
@@ -1322,6 +1323,37 @@
           </div>
         </div>
 
+        <!-- Export Ayarları -->
+        <div class="section" id="sec-export">
+          <div class="section-header" onclick="toggleSection('export')">
+            <div class="section-icon icon-transform">⇧</div>
+            <span class="section-label">Export Ayarları</span>
+            <span class="section-chevron">▼</span>
+          </div>
+          <div class="section-body">
+            <div class="control">
+              <div class="control-label" style="margin-bottom:5px;">
+                USDZ Texture Boyutu
+                <span style="display:block;font-size:10px;color:var(--text-muted);font-weight:400;margin-top:1px;">boyutu küçültür, kaliteyi düşürür</span>
+              </div>
+              <select class="select-control" id="usdz-tex-size" onchange="usdzMaxTexSize = this.value === 'Infinity' ? Infinity : +this.value">
+                <option value="Infinity">Sınırsız — Orijinal kalite</option>
+                <option value="2048">2048 px — Yüksek</option>
+                <option value="1024" selected>1024 px — Önerilen ↓boyut</option>
+                <option value="512">512 px — Küçük dosya</option>
+                <option value="256">256 px — Minimum</option>
+              </select>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);line-height:1.55;background:var(--surface2);border-radius:6px;padding:8px 10px;">
+              ⓘ <strong style="color:var(--text);">GLB → USDZ neden büyür?</strong><br>
+              GLB: Draco geometri + JPG texture<br>
+              USDZ: Ham geometri + PNG texture<br>
+              47 MB GLB → 130 MB USDZ normaldir.<br>
+              <strong style="color:var(--accent2);">1024px seçeneği boyutu ~4-8× küçültür.</strong>
+            </div>
+          </div>
+        </div>
+
         <!-- Scene Info -->
         <div class="section" id="sec-sceneinfo">
           <div class="section-header" onclick="toggleSection('sceneinfo')">
@@ -1360,7 +1392,7 @@
 </div>
 
 <!-- Hidden file input -->
-<input type="file" id="file-input" accept=".glb,.gltf" style="display:none">
+<input type="file" id="file-input" accept=".glb,.gltf,.usdz" style="display:none">
 
 <!-- THREE.JS via CDN (ES Module) -->
 <script type="importmap">
@@ -1379,6 +1411,7 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RGBELoader }    from 'three/addons/loaders/RGBELoader.js';
 import { USDZExporter }  from 'three/addons/exporters/USDZExporter.js';
 import { GLTFExporter }  from 'three/addons/exporters/GLTFExporter.js';
+import * as fflate       from 'three/addons/libs/fflate.module.js';
 // RoomEnvironment kaldırıldı — studio env kendi kendine oluşturuluyor
 
 // ──────────────────────────────────────────────
@@ -1495,6 +1528,7 @@ let autoScaleValue   = 1.0;   // Viewport'a sığdırma için hesaplanan auto-fi
 let exportScaleFactor = 1.0;  // Kullanıcının belirlediği gerçek dünya ölçeği (AR/export için)
 let currentFileName  = '';    // Yüklü dosya adı
 let sizeLocked       = true;  // Boyut girişleri: oran kilitli mi?
+let usdzMaxTexSize   = 1024;  // USDZ export texture boyut sınırı (px)
 const usdzExporter = new USDZExporter();
 const glbExporter  = new GLTFExporter();
 
@@ -1527,8 +1561,9 @@ animate();
 // ──────────────────────────────────────────────
 const loader = new GLTFLoader();
 
-function loadGLB(url, filename) {
-  showSpinner(true);
+// ── Shared GLTF success handler (loadGLB ve loadUSDZ tarafından çağrılır) ────
+function _onGltfLoaded(gltf, filename) {
+  // Eski modeli temizle
   if (model) {
     scene.remove(model);
     model = null;
@@ -1536,82 +1571,87 @@ function loadGLB(url, filename) {
     activeMesh = null;
   }
 
-  loader.load(url, (gltf) => {
-    model = gltf.scene;
+  model = gltf.scene;
 
-    // Collect meshes
-    meshes = [];
-    model.traverse(child => {
-      if (child.isMesh) {
-        child.castShadow = true;
-        child.receiveShadow = true;
-        meshes.push(child);
-        // envMapIntensity 0 olarak gelirse env map hiç görünmez — düzelt
-        if (child.material) {
-          // 0 veya çok düşük gelirse specular görünmez — 1'e sabitle
-          if (!child.material.envMapIntensity || child.material.envMapIntensity < 0.1)
-            child.material.envMapIntensity = 1;
-          const orig = child.material.clone();
-          origMaterials.set(child.uuid, orig);
-        }
+  // Collect meshes
+  meshes = [];
+  model.traverse(child => {
+    if (child.isMesh) {
+      child.castShadow = true;
+      child.receiveShadow = true;
+      meshes.push(child);
+      // envMapIntensity 0 olarak gelirse env map hiç görünmez — düzelt
+      if (child.material) {
+        // 0 veya çok düşük gelirse specular görünmez — 1'e sabitle
+        if (!child.material.envMapIntensity || child.material.envMapIntensity < 0.1)
+          child.material.envMapIntensity = 1;
+        const orig = child.material.clone();
+        origMaterials.set(child.uuid, orig);
       }
-    });
-
-    // Auto-center & scale
-    const box = new THREE.Box3().setFromObject(model);
-    const size = box.getSize(new THREE.Vector3());
-    const center = box.getCenter(new THREE.Vector3());
-    const maxDim = Math.max(size.x, size.y, size.z);
-    const scale = 1.5 / maxDim;
-
-    // Orijinal GLB boyutunu kaydet (1 Three.js birimi = 1 metre = 100 cm)
-    modelOrigSizeM    = { x: size.x, y: size.y, z: size.z };
-    currentFileName   = filename || '';
-    autoScaleValue    = scale;   // sadece viewport fit için — export'a GITMEZ
-    exportScaleFactor = 1.0;     // başlangıç: orijinal GLB boyutu (değiştirilmemiş)
-
-    model.scale.setScalar(autoScaleValue); // sadece görüntü için
-    model.position.sub(center.multiplyScalar(scale));
-    model.position.y += size.y * scale * 0.5;
-
-    // Scale slider = exportScaleFactor (1.0 = orijinal GLB boyutu)
-    document.getElementById('model-scale').value = 1.0;
-    document.getElementById('val-scale').textContent = '1.000';
-
-    gridHelper.position.y = -(size.y * scale * 0.5) + model.position.y - size.y * scale * 0.5;
-    shadowPlane.position.y = gridHelper.position.y + 0.001;
-
-    scene.add(model);
-    showSpinner(false);
-    showDropZone(false);
-
-    // Update UI
-    populateMeshSelect();
-    updateSceneInfo(filename);
-
-    // Boyut (cm) göster
-    document.getElementById('dims-wrap').style.display = '';
-    updateSizeCmUI();
-
-    // Select first mesh
-    if (meshes.length > 0) {
-      document.getElementById('mesh-select').value = meshes[0].uuid;
-      selectMesh(meshes[0].uuid);
     }
+  });
 
-    // Clearcoat uyarısı — food modellerinde sıkça var ve base roughness'ı etkisiz kılar
-    const hasClearcoat = meshes.some(m => m.material?.clearcoat > 0);
-    if (hasClearcoat) {
-      showToast('⚠ Clearcoat aktif — parlaklık için Clearcoat = 0 yapın', 'warn');
-    }
+  // Auto-center & scale
+  const box = new THREE.Box3().setFromObject(model);
+  const size = box.getSize(new THREE.Vector3());
+  const center = box.getCenter(new THREE.Vector3());
+  const maxDim = Math.max(size.x, size.y, size.z);
+  const scale = 1.5 / maxDim;
 
-    // Enable buttons
-    document.getElementById('btn-reset-all').disabled = false;
-    document.getElementById('btn-screenshot').disabled = false;
-    document.getElementById('btn-copy-json').disabled = false;
-    document.getElementById('btn-reset-mat').disabled = false;
-    document.getElementById('btn-export-glb').disabled = false;
-    document.getElementById('btn-export-usdz').disabled = false;
+  // Orijinal GLB boyutunu kaydet (1 Three.js birimi = 1 metre = 100 cm)
+  modelOrigSizeM    = { x: size.x, y: size.y, z: size.z };
+  currentFileName   = filename || '';
+  autoScaleValue    = scale;   // sadece viewport fit için — export'a GITMEZ
+  exportScaleFactor = 1.0;     // başlangıç: orijinal GLB boyutu (değiştirilmemiş)
+
+  model.scale.setScalar(autoScaleValue); // sadece görüntü için
+  model.position.sub(center.multiplyScalar(scale));
+  model.position.y += size.y * scale * 0.5;
+
+  // Scale slider = exportScaleFactor (1.0 = orijinal GLB boyutu)
+  document.getElementById('model-scale').value = 1.0;
+  document.getElementById('val-scale').textContent = '1.000';
+
+  gridHelper.position.y = -(size.y * scale * 0.5) + model.position.y - size.y * scale * 0.5;
+  shadowPlane.position.y = gridHelper.position.y + 0.001;
+
+  scene.add(model);
+  showSpinner(false);
+  showDropZone(false);
+
+  // Update UI
+  populateMeshSelect();
+  updateSceneInfo(filename);
+
+  // Boyut (cm) göster
+  document.getElementById('dims-wrap').style.display = '';
+  updateSizeCmUI();
+
+  // Select first mesh
+  if (meshes.length > 0) {
+    document.getElementById('mesh-select').value = meshes[0].uuid;
+    selectMesh(meshes[0].uuid);
+  }
+
+  // Clearcoat uyarısı — food modellerinde sıkça var ve base roughness'ı etkisiz kılar
+  const hasClearcoat = meshes.some(m => m.material?.clearcoat > 0);
+  if (hasClearcoat) {
+    showToast('⚠ Clearcoat aktif — parlaklık için Clearcoat = 0 yapın', 'warn');
+  }
+
+  // Enable buttons
+  document.getElementById('btn-reset-all').disabled = false;
+  document.getElementById('btn-screenshot').disabled = false;
+  document.getElementById('btn-copy-json').disabled = false;
+  document.getElementById('btn-reset-mat').disabled = false;
+  document.getElementById('btn-export-glb').disabled = false;
+  document.getElementById('btn-export-usdz').disabled = false;
+}
+
+function loadGLB(url, filename) {
+  showSpinner(true);
+  loader.load(url, (gltf) => {
+    _onGltfLoaded(gltf, filename);
   }, undefined, (err) => {
     showSpinner(false);
     showToast('Model yüklenemedi: ' + err.message);
@@ -2154,8 +2194,12 @@ const fileInput = document.getElementById('file-input');
 fileInput.addEventListener('change', (e) => {
   const file = e.target.files[0];
   if (!file) return;
-  const url = URL.createObjectURL(file);
-  loadGLB(url, file.name);
+  if (file.name.toLowerCase().endsWith('.usdz')) {
+    file.arrayBuffer().then(buf => loadUSDZ(buf, file.name));
+  } else {
+    const url = URL.createObjectURL(file);
+    loadGLB(url, file.name);
+  }
   fileInput.value = '';
 });
 
@@ -2177,11 +2221,15 @@ canvasWrap.addEventListener('drop', (e) => {
   e.preventDefault();
   dropZone.classList.remove('drag-over');
   const file = e.dataTransfer.files[0];
-  if (file && (file.name.endsWith('.glb') || file.name.endsWith('.gltf'))) {
+  if (!file) return;
+  const name = file.name.toLowerCase();
+  if (name.endsWith('.usdz')) {
+    file.arrayBuffer().then(buf => loadUSDZ(buf, file.name));
+  } else if (name.endsWith('.glb') || name.endsWith('.gltf')) {
     const url = URL.createObjectURL(file);
     loadGLB(url, file.name);
   } else {
-    showToast('Lütfen .glb veya .gltf dosyası yükleyin');
+    showToast('Lütfen .glb, .gltf veya .usdz dosyası yükleyin');
   }
 });
 
@@ -2273,35 +2321,81 @@ window.exportGLB = function() {
   );
 };
 
+// ── Texture resize (export öncesi PNG boyutunu küçültmek için) ──────────────
+const TEX_KEYS = ['map','emissiveMap','roughnessMap','metalnessMap',
+                  'normalMap','aoMap','alphaMap','clearcoatMap','clearcoatRoughnessMap'];
+
+function resizeTexturesForExport(obj, maxPx) {
+  const saved = new Map();
+  if (!maxPx || maxPx >= 8192) return saved;
+
+  obj.traverse(child => {
+    if (!child.isMesh) return;
+    const mats = Array.isArray(child.material) ? child.material : [child.material];
+    mats.forEach(mat => {
+      if (!mat) return;
+      TEX_KEYS.forEach(key => {
+        const tex = mat[key];
+        if (!tex?.image) return;
+        const img  = tex.image;
+        const origW = img.width || img.naturalWidth;
+        const origH = img.height || img.naturalHeight;
+        if (!origW || !origH || Math.max(origW, origH) <= maxPx) return;
+
+        const scale  = maxPx / Math.max(origW, origH);
+        const canvas = document.createElement('canvas');
+        canvas.width  = Math.round(origW * scale);
+        canvas.height = Math.round(origH * scale);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+
+        const id = `${tex.uuid}::${key}::${mat.uuid}`;
+        saved.set(id, { tex, origImage: tex.image });
+        tex.image = canvas;
+        tex.needsUpdate = true;
+      });
+    });
+  });
+  return saved;
+}
+
+function restoreTextures(saved) {
+  saved.forEach(({ tex, origImage }) => {
+    tex.image = origImage;
+    tex.needsUpdate = true;
+  });
+}
+
 window.exportUSDZ = async function() {
   if (!model) return;
   showToast('USDZ oluşturuluyor...', 'warn');
 
-  // Export anında model.scale = exportScaleFactor (autoFit olmadan — AR doğru boyut)
   const displayScale = model.scale.x;
   model.scale.setScalar(exportScaleFactor);
 
+  // Texture'ları seçilen boyuta küçült — PNG boyutunu azaltır
+  const savedTex = resizeTexturesForExport(model, usdzMaxTexSize);
+
   try {
-    // Her çağrıda taze instance — stale state ve method-binding sorunlarını önler
     const exp = new USDZExporter();
     let result;
 
     if (typeof exp.parseAsync === 'function') {
-      // three.js r153+ — async, returns Promise<Uint8Array>
-      result = await exp.parseAsync(model);
+      result = await exp.parseAsync(model, { maxTextureSize: usdzMaxTexSize });
     } else if (typeof exp.parse === 'function') {
-      // Eski sürüm — sync veya async olabilir, ikisini de handle et
       const raw = exp.parse(model);
       result = (raw instanceof Promise) ? await raw : raw;
     } else {
-      throw new Error('USDZExporter API bulunamadı (three.js sürüm uyumsuzluğu)');
+      throw new Error('USDZExporter API bulunamadı');
     }
+
+    restoreTextures(savedTex);
+    model.scale.setScalar(displayScale);
 
     if (!result || result.byteLength === 0) {
-      throw new Error('Boş USDZ verisi oluşturuldu — model geometri sorunu olabilir');
+      throw new Error('Boş USDZ verisi — model geometri/texture sorunu olabilir');
     }
 
-    model.scale.setScalar(displayScale);
+    const mb   = (result.byteLength / 1048576).toFixed(1);
     const blob = new Blob([result], { type: 'model/vnd.usdz+zip' });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
@@ -2309,13 +2403,46 @@ window.exportUSDZ = async function() {
     a.download = (currentFileName.replace(/\.[^.]+$/, '') || 'model') + '.usdz';
     a.click();
     URL.revokeObjectURL(url);
-    showToast('USDZ indirildi!', 'success');
+    showToast(`USDZ indirildi! ${mb} MB`, 'success');
   } catch (err) {
+    restoreTextures(savedTex);
     model.scale.setScalar(displayScale);
     showToast('USDZ hatası: ' + err.message);
     console.error('[USDZ Export]', err);
   }
 };
+
+// ── USDZ LOADING (ZIP içindeki GLB'yi bul ve yükle) ─────────────────────────
+async function loadUSDZ(arrayBuffer, filename) {
+  showSpinner(true);
+  try {
+    const uint8   = new Uint8Array(arrayBuffer);
+    const files   = fflate.unzipSync(uint8);
+    const entries = Object.keys(files);
+
+    // ZIP içinde .glb var mı?
+    const glbEntry = entries.find(n => n.toLowerCase().endsWith('.glb'));
+
+    if (glbEntry) {
+      showToast(`USDZ içinde GLB bulundu: ${glbEntry}`, 'success');
+      loader.parse(files[glbEntry].buffer, '',
+        gltf  => { _onGltfLoaded(gltf, filename); },
+        err   => { showSpinner(false); showToast('GLB yüklenemedi: ' + err.message); }
+      );
+    } else {
+      showSpinner(false);
+      const found = entries.map(e => e.split('/').pop()).slice(0, 6).join(', ');
+      showToast(
+        `USDZ USD/USDC formatında — Three.js açamıyor. İçerik: ${found}. Lütfen GLB versiyonunu kullanın.`,
+        'warn'
+      );
+    }
+  } catch (err) {
+    showSpinner(false);
+    showToast('USDZ açılamadı: ' + err.message);
+    console.error('[USDZ Load]', err);
+  }
+}
 
 document.getElementById('btn-export-glb').addEventListener('click', exportGLB);
 document.getElementById('btn-export-usdz').addEventListener('click', exportUSDZ);
