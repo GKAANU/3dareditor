@@ -786,6 +786,66 @@
     @media (max-width: 700px) {
       .side-panel { width: 260px; }
     }
+
+    /* ── USDZ INFO MODAL ── */
+    #usdz-modal-overlay {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0,0,0,0.65);
+      z-index: 9999;
+      align-items: center;
+      justify-content: center;
+    }
+    #usdz-modal-overlay.show { display: flex; }
+    .usdz-modal-box {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 24px 28px;
+      max-width: 500px;
+      width: 92%;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+    }
+    .usdz-modal-title {
+      font-size: 15px;
+      font-weight: 700;
+      margin-bottom: 14px;
+      color: #fbbf24;
+    }
+    .usdz-modal-body {
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.7;
+    }
+    .usdz-modal-body strong { color: var(--text); }
+    .usdz-modal-body code {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-size: 11px;
+      color: var(--accent2);
+      word-break: break-all;
+    }
+    .usdz-modal-body em { color: var(--accent2); font-style: normal; font-weight: 500; }
+    .usdz-modal-footer {
+      margin-top: 20px;
+      display: flex;
+      justify-content: flex-end;
+    }
+    .usdz-modal-ok {
+      padding: 8px 22px;
+      background: var(--accent);
+      border: none;
+      border-radius: 8px;
+      color: #fff;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .usdz-modal-ok:hover { background: var(--accent2); }
   </style>
 </head>
 <body>
@@ -868,6 +928,20 @@
 
     <!-- Toast -->
     <div class="toast" id="toast"></div>
+  </div>
+
+  <!-- USDZ Info Modal -->
+  <div id="usdz-modal-overlay">
+    <div class="usdz-modal-box">
+      <div class="usdz-modal-title" id="usdz-modal-title"></div>
+      <div class="usdz-modal-body"  id="usdz-modal-body"></div>
+      <div class="usdz-modal-footer">
+        <button class="usdz-modal-ok"
+          onclick="document.getElementById('usdz-modal-overlay').classList.remove('show')">
+          Tamam
+        </button>
+      </div>
+    </div>
   </div>
 
   <!-- SIDE PANEL -->
@@ -2412,6 +2486,13 @@ window.exportUSDZ = async function() {
   }
 };
 
+// ── USDZ INFO MODAL ─────────────────────────────────────────────────────────
+function showUsdzModal(title, bodyHTML) {
+  document.getElementById('usdz-modal-title').textContent = title;
+  document.getElementById('usdz-modal-body').innerHTML   = bodyHTML;
+  document.getElementById('usdz-modal-overlay').classList.add('show');
+}
+
 // ── USDZ LOADING (ZIP içindeki GLB'yi bul ve yükle) ─────────────────────────
 async function loadUSDZ(arrayBuffer, filename) {
   showSpinner(true);
@@ -2422,20 +2503,53 @@ async function loadUSDZ(arrayBuffer, filename) {
 
     // ZIP içinde .glb var mı?
     const glbEntry = entries.find(n => n.toLowerCase().endsWith('.glb'));
-
     if (glbEntry) {
       showToast(`USDZ içinde GLB bulundu: ${glbEntry}`, 'success');
       loader.parse(files[glbEntry].buffer, '',
         gltf  => { _onGltfLoaded(gltf, filename); },
         err   => { showSpinner(false); showToast('GLB yüklenemedi: ' + err.message); }
       );
+      return;
+    }
+
+    showSpinner(false);
+    console.warn('[USDZ Load] ZIP içeriği:', entries);
+
+    // .usdc (binary USD) veya .usda (ASCII USD) var mı?
+    const usdcEntry = entries.find(n => /\.usdc$/i.test(n));
+    const usdaEntry = entries.find(n => /\.usda$/i.test(n));
+
+    // Dosya isimlerini temiz listele (dizin girdilerini, boş ve sadece rakam olanları filtrele)
+    const allNames = entries
+      .map(e => e.replace(/^.*\//, ''))
+      .filter(n => n && n.includes('.'))
+      .join('<br>• ');
+
+    if (usdcEntry || usdaEntry) {
+      const geoFile = usdcEntry || usdaEntry;
+      showUsdzModal('⚠ Standart USDZ — Açılamıyor', `
+        <p>Bu dosya <strong>standart Apple/Tripo3D USDZ</strong> formatında.</p>
+        <p style="margin-top:10px;">📐 Geometri: <code>${geoFile}</code>
+          <span style="font-size:11px;">(USD binary — Three.js okuyamıyor)</span></p>
+        <p style="margin-top:4px;">🖼 Dosyalar:<br>• <code>${allNames || '—'}</code></p>
+        <hr style="border:none;border-top:1px solid var(--border);margin:14px 0;">
+        <p><strong>✅ Çözüm — Tripo3D'den GLB indirin:</strong></p>
+        <p style="margin-top:6px;">
+          Tripo3D → Modelinizi seçin → <em>İndir</em> → Format: <em>GLB</em>
+        </p>
+        <p style="margin-top:10px;">GLB'yi bu editörde düzenleyip,
+          bitince <em>USDZ olarak export</em> alabilirsiniz.</p>
+        <p style="margin-top:12px;font-size:11px;color:var(--text-muted);">
+          ⓘ USDZ = iOS AR görüntüleme formatı. Düzenlemek için GLB gerekir.</p>
+      `);
     } else {
-      showSpinner(false);
-      const found = entries.map(e => e.split('/').pop()).slice(0, 6).join(', ');
-      showToast(
-        `USDZ USD/USDC formatında — Three.js açamıyor. İçerik: ${found}. Lütfen GLB versiyonunu kullanın.`,
-        'warn'
-      );
+      showUsdzModal('⚠ USDZ Açılamadı', `
+        <p>ZIP içinde tanınan geometri formatı (.glb / .usdc) bulunamadı.</p>
+        <p style="margin-top:10px;">📦 İçerik:<br>• <code>${allNames || '—'}</code></p>
+        <p style="margin-top:14px;">
+          <strong>Çözüm:</strong> Modelin <em>GLB versiyonunu</em> yükleyin.
+        </p>
+      `);
     }
   } catch (err) {
     showSpinner(false);
