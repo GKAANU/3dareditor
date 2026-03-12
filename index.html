@@ -2709,36 +2709,49 @@ async function loadUsdzNative(arrayBuffer, filename) {
 
   if (!_usdzLoaderMod) {
     showToast('1/3 USDZ modülü indiriliyor…', 'warn');
+    console.log('[USDZ] 1/3 esm.sh import başlıyor:', USDZ_ESM_URL);
     try {
-      // esm.sh → CJS lib/USDZLoader.js'i gerçek ES modüle çevirir;
-      // ?external=three → Three.js'i importmap'ten alır, paket kendi kopyasını getirmez
-      _usdzLoaderMod = await _withTimeout(import(USDZ_ESM_URL), 25000, 'ESM import');
+      _usdzLoaderMod = await _withTimeout(import(USDZ_ESM_URL), 15000, 'ESM import');
+      console.log('[USDZ] 1/3 modül yüklendi. Exports:', Object.keys(_usdzLoaderMod));
     } catch (e) {
       _usdzLoaderFail = true;
+      console.error('[USDZ] 1/3 BAŞARISIZ:', e);
       throw new Error('CDN_IMPORT_FAIL: ' + e.message);
     }
   }
 
   // esm.sh CJS modülden { USDZLoader } named export üretir
   const USDZLoader = _usdzLoaderMod.USDZLoader || _usdzLoaderMod.default?.USDZLoader;
+  console.log('[USDZ] USDZLoader sınıfı:', USDZLoader);
   if (!USDZLoader || typeof USDZLoader !== 'function') {
     _usdzLoaderFail = true;
     throw new Error('USDZLoader bulunamadı (exports: ' + Object.keys(_usdzLoaderMod).join(',') + ')');
   }
 
-  // Doğru API: new USDZLoader(externalDir) → initialize() → waitForModuleReady() → loadFile()
   showToast('2/3 WASM initialize ediliyor… (~9 MB)', 'warn');
+  console.log('[USDZ] 2/3 USDZLoader initialize:', USDZ_EXT_DIR);
   const usdzLoader = new USDZLoader(USDZ_EXT_DIR);
-  await _withTimeout(usdzLoader.initialize(USDZ_EXT_DIR), 60000, 'WASM initialize');
-  await _withTimeout(usdzLoader.waitForModuleReady(),      60000, 'WASM ready');
+  const initResult = usdzLoader.initialize(USDZ_EXT_DIR);
+  console.log('[USDZ] initialize() dönüş tipi:', typeof initResult, initResult);
+  if (initResult && typeof initResult.then === 'function') {
+    await _withTimeout(initResult, 15000, 'WASM initialize');
+  }
+  console.log('[USDZ] waitForModuleReady() çağrılıyor…');
+  const readyResult = usdzLoader.waitForModuleReady();
+  console.log('[USDZ] waitForModuleReady() dönüş tipi:', typeof readyResult, readyResult);
+  if (readyResult && typeof readyResult.then === 'function') {
+    await _withTimeout(readyResult, 15000, 'WASM ready');
+  }
 
   showToast('3/3 USDZ geometrisi parse ediliyor…', 'warn');
+  console.log('[USDZ] 3/3 loadFile çağrılıyor…');
   const container = new THREE.Group();
   const file = new File([arrayBuffer], filename || 'model.usdz', {
     type: 'model/vnd.usdz+zip'
   });
 
-  await _withTimeout(usdzLoader.loadFile(file, container), 120000, 'loadFile');
+  await _withTimeout(usdzLoader.loadFile(file, container), 30000, 'loadFile');
+  console.log('[USDZ] loadFile tamamlandı. Container children:', container.children.length);
   return container;
 }
 
